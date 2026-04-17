@@ -1,4 +1,4 @@
-// vignette.wgsl — radial vignette + mild chromatic aberration
+// vignette.wgsl — radial vignette + per-lens chromatic aberration
 
 struct CameraParams {
   exposure_ev:       f32,
@@ -15,6 +15,10 @@ struct CameraParams {
   vignette_strength: f32,
   width:             u32,
   height:            u32,
+  blade_count:       u32,
+  blade_rotation:    f32,
+  swirl_strength:    f32,
+  chrom_aberr:       f32,
   _pad0:             u32,
   _pad1:             u32,
 }
@@ -33,8 +37,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // NDC center [-1, 1]
   let ndc = (vec2<f32>(coord) + 0.5) / vec2<f32>(wf, hf) * 2.0 - 1.0;
 
-  // Chromatic aberration: shift R outward, B inward along ndc direction
-  let ca = params.vignette_strength * 0.012;
+  // Per-lens chromatic aberration: R shifts outward, B shifts inward
+  let ca = params.chrom_aberr * 0.015;
   let ca_shift = ndc * ca;
   let r_coord = clamp(
     coord + vec2<i32>(round(ca_shift * vec2<f32>(wf, hf))),
@@ -49,7 +53,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   col.r = textureLoad(input_tex, r_coord, 0).r;
   col.b = textureLoad(input_tex, b_coord, 0).b;
 
-  // Vignette: smooth falloff toward corners
+  // Radial vignette: smooth falloff toward corners
   let dist2 = dot(ndc, ndc);
   let vignette = 1.0 - params.vignette_strength * smoothstep(0.25, 1.6, dist2);
   col *= vignette;

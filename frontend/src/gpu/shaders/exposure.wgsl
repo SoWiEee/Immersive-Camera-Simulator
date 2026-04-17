@@ -15,6 +15,10 @@ struct CameraParams {
   vignette_strength: f32,
   width:             u32,
   height:            u32,
+  blade_count:       u32,
+  blade_rotation:    f32,
+  swirl_strength:    f32,
+  chrom_aberr:       f32,
   _pad0:             u32,
   _pad1:             u32,
 }

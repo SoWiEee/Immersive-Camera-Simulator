@@ -4,6 +4,8 @@ import { storeToRefs } from "pinia";
 import { useCameraStore } from "@/stores/cameraStore";
 import { useImageFX } from "@/composables/useImageFX";
 import { SENSORS } from "@/data/sensors";
+import DialWheel, { type DialStop } from "@/components/DialWheel/DialWheel.vue";
+import LensSelector from "@/components/LensSelector/LensSelector.vue";
 
 const store = useCameraStore();
 const {
@@ -23,10 +25,10 @@ const {
   motionAngle,
   motionStrength,
   equivalentFocalLength,
-  ev100,
-  evAdjusted,
   exposureDelta,
   selectedSensorId,
+  selectedLensId,
+  lens,
 } = storeToRefs(store);
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
@@ -62,14 +64,46 @@ function onCanvasClick(event: MouseEvent) {
   if (depth !== null) focusDepth.value = depth;
 }
 
-// Shutter speed display helper
-function formatShutter(s: number): string {
-  if (s >= 0.5) return `${s.toFixed(1)}s`;
-  const denom = Math.round(1 / s);
-  return `1/${denom}`;
-}
+// ---- Shutter speed dial stops ----
+const SHUTTER_STOPS: DialStop[] = [
+  { value: 1 / 4000, label: "1/4000" },
+  { value: 1 / 2000, label: "1/2000" },
+  { value: 1 / 1000, label: "1/1000" },
+  { value: 1 / 500, label: "1/500" },
+  { value: 1 / 250, label: "1/250" },
+  { value: 1 / 125, label: "1/125" },
+  { value: 1 / 60, label: "1/60" },
+  { value: 1 / 30, label: "1/30" },
+  { value: 1 / 15, label: "1/15" },
+  { value: 1 / 8, label: "1/8" },
+  { value: 1 / 4, label: "1/4" },
+  { value: 1 / 2, label: '1/2"' },
+  { value: 1, label: '1"' },
+  { value: 2, label: '2"' },
+  { value: 4, label: '4"' },
+  { value: 8, label: '8"' },
+  { value: 15, label: '15"' },
+  { value: 30, label: '30"' },
+];
 
-// EV bar width for histogram-style indicator
+// ---- ISO dial stops ----
+const ISO_STOPS: DialStop[] = [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600].map((v) => ({
+  value: v,
+  label: String(v),
+}));
+
+// ---- Focal length presets ----
+const FL_PRESETS = [24, 28, 35, 50, 58, 85, 135, 200];
+
+// ---- Aperture f-stop presets from current lens range ----
+const apertureStops = computed(() => {
+  const stops = [1.0, 1.2, 1.4, 1.8, 2.0, 2.8, 4, 5.6, 8, 11, 16, 22];
+  return stops
+    .filter((f) => f >= lens.value.maxAperture - 0.05 && f <= lens.value.minAperture + 0.05)
+    .map((v) => ({ value: v, label: `f/${v}` }));
+});
+
+// ---- EV display ----
 const evBarWidth = computed(() => {
   const clamped = Math.max(-3, Math.min(3, exposureDelta.value));
   return ((clamped + 3) / 6) * 100;
@@ -81,8 +115,18 @@ const evBarColor = computed(() => {
   return "#52c41a";
 });
 
+function formatShutter(s: number): string {
+  if (s >= 0.5) return `${s.toFixed(1)}s`;
+  const denom = Math.round(1 / s);
+  return `1/${denom}`;
+}
+
 function onNewPhoto() {
   store.setAppState("idle");
+}
+
+function onReset() {
+  store.resetCameraParams();
 }
 </script>
 
@@ -100,7 +144,6 @@ function onNewPhoto() {
         <span class="viewfinder__spinner" />
         <p>景深推算中…</p>
       </div>
-      <!-- Focus depth click hint -->
       <div v-if="appState === 'ready'" class="viewfinder__hint">點擊畫面選取對焦點</div>
     </div>
 
@@ -151,7 +194,13 @@ function onNewPhoto() {
         <p class="ctrl-hint">等效焦距：{{ equivalentFocalLength.toFixed(0) }} mm</p>
       </div>
 
-      <!-- Aperture -->
+      <!-- ---- Lens selector ---- -->
+      <details class="ctrl-details">
+        <summary class="ctrl-summary">鏡頭選擇 — {{ lens.name }}</summary>
+        <LensSelector v-model="selectedLensId" />
+      </details>
+
+      <!-- Aperture f-stop presets -->
       <div
         class="ctrl-group"
         :class="{ 'ctrl-group--disabled': shootingMode === 'S' || shootingMode === 'P' }"
@@ -159,22 +208,24 @@ function onNewPhoto() {
         <div class="ctrl-label">
           光圈 <span class="ctrl-value">f/{{ aperture.toFixed(1) }}</span>
         </div>
-        <input
-          type="range"
-          class="ctrl-slider"
-          min="1"
-          max="32"
-          step="0.1"
-          :value="aperture"
-          @input="
-            aperture = +($event.target as HTMLInputElement).value;
-            store.autoComputeExposure();
-          "
-        />
+        <div class="preset-row">
+          <button
+            v-for="stop in apertureStops"
+            :key="stop.value"
+            class="preset-btn"
+            :class="{ 'preset-btn--active': Math.abs(aperture - stop.value) < 0.05 }"
+            @click="
+              aperture = stop.value;
+              store.autoComputeExposure();
+            "
+          >
+            f/{{ stop.value }}
+          </button>
+        </div>
         <p class="ctrl-hint">小 f 值 → 淺景深・更大散景</p>
       </div>
 
-      <!-- Shutter speed -->
+      <!-- Shutter speed dial -->
       <div
         class="ctrl-group"
         :class="{ 'ctrl-group--disabled': shootingMode === 'A' || shootingMode === 'P' }"
@@ -182,47 +233,64 @@ function onNewPhoto() {
         <div class="ctrl-label">
           快門 <span class="ctrl-value">{{ formatShutter(shutterSpeed) }}</span>
         </div>
-        <input
-          type="range"
-          class="ctrl-slider"
-          min="-13"
-          max="0"
-          step="0.5"
-          :value="Math.log2(shutterSpeed)"
-          @input="
-            shutterSpeed = Math.pow(2, +($event.target as HTMLInputElement).value);
-            store.autoComputeExposure();
+        <DialWheel
+          :stops="SHUTTER_STOPS"
+          v-model="shutterSpeed"
+          :disabled="shootingMode === 'A' || shootingMode === 'P'"
+          :log-scale="true"
+          @update:model-value="
+            (v) => {
+              shutterSpeed = v;
+              store.autoComputeExposure();
+            }
           "
         />
         <p class="ctrl-hint">慢快門 → 更多動態模糊・曝光增加</p>
       </div>
 
-      <!-- ISO -->
+      <!-- ISO dial -->
       <div class="ctrl-group">
         <div class="ctrl-label">
           ISO <span class="ctrl-value">{{ iso }}</span>
         </div>
-        <input
-          type="range"
-          class="ctrl-slider"
-          min="100"
-          max="25600"
-          step="100"
-          v-model.number="iso"
+        <DialWheel
+          :stops="ISO_STOPS"
+          v-model="iso"
+          :log-scale="true"
+          @update:model-value="
+            (v) => {
+              iso = v;
+              store.autoComputeExposure();
+            }
+          "
         />
         <p class="ctrl-hint">高 ISO → 更多雜訊・感光度提升</p>
       </div>
 
-      <!-- Focal length -->
+      <!-- Focal length presets -->
       <div class="ctrl-group">
         <div class="ctrl-label">
-          焦段 <span class="ctrl-value">{{ focalLength }} mm</span>
+          焦段
+          <span class="ctrl-value"
+            >{{ focalLength }}mm (等效 {{ equivalentFocalLength.toFixed(0) }}mm)</span
+          >
+        </div>
+        <div class="preset-row">
+          <button
+            v-for="fl in FL_PRESETS"
+            :key="fl"
+            class="preset-btn"
+            :class="{ 'preset-btn--active': focalLength === fl }"
+            @click="focalLength = fl"
+          >
+            {{ fl }}
+          </button>
         </div>
         <input
           type="range"
           class="ctrl-slider"
-          min="12"
-          max="200"
+          min="14"
+          max="600"
           step="1"
           v-model.number="focalLength"
         />
@@ -350,7 +418,13 @@ function onNewPhoto() {
         </p>
       </div>
 
-      <button class="ctrl-btn" @click="onNewPhoto">換張照片</button>
+      <!-- Action buttons -->
+      <div class="ctrl-actions">
+        <button class="ctrl-btn ctrl-btn--reset" @click="onReset" title="重設相機參數">
+          重設參數
+        </button>
+        <button class="ctrl-btn" @click="onNewPhoto">換張照片</button>
+      </div>
     </aside>
   </div>
 </template>
@@ -421,14 +495,14 @@ function onNewPhoto() {
 
 /* Controls sidebar */
 .controls {
-  width: 260px;
+  width: 270px;
   flex-shrink: 0;
   border-left: 1px solid var(--border);
   background: var(--surface);
-  padding: 16px 14px;
+  padding: 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   overflow-y: auto;
   font-size: 12px;
 }
@@ -446,14 +520,16 @@ function onNewPhoto() {
 .ctrl-label {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 11px;
+  font-size: 10px;
 }
 .ctrl-value {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+  font-size: 11px;
 }
 
 .ctrl-slider {
@@ -505,6 +581,36 @@ function onNewPhoto() {
   background: rgba(255, 153, 51, 0.08);
 }
 
+/* Preset button rows (aperture f-stops, focal length) */
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.preset-btn {
+  padding: 3px 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    border-color 0.1s,
+    color 0.1s,
+    background 0.1s;
+}
+.preset-btn:hover {
+  border-color: var(--accent-dim);
+  color: var(--text);
+}
+.preset-btn--active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(255, 153, 51, 0.08);
+}
+
 /* EV meter */
 .ev-bar-track {
   position: relative;
@@ -530,19 +636,22 @@ function onNewPhoto() {
   transform: translateX(-50%);
 }
 
-/* Advanced section */
+/* Collapsible sections */
 .ctrl-details {
   border-top: 1px solid var(--border);
   padding-top: 10px;
 }
 .ctrl-summary {
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   list-style: none;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ctrl-summary::before {
   content: "▶ ";
@@ -551,6 +660,7 @@ details[open] .ctrl-summary::before {
   content: "▼ ";
 }
 
+/* Info block */
 .ctrl-group--info {
   color: var(--text-dim);
   line-height: 1.8;
@@ -561,14 +671,20 @@ details[open] .ctrl-summary::before {
   color: var(--text);
 }
 
-.ctrl-btn {
+/* Action buttons */
+.ctrl-actions {
+  display: flex;
+  gap: 6px;
   margin-top: auto;
-  padding: 8px 12px;
+}
+.ctrl-btn {
+  flex: 1;
+  padding: 7px 10px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
   transition:
     border-color 0.15s,
@@ -577,5 +693,12 @@ details[open] .ctrl-summary::before {
 .ctrl-btn:hover {
   border-color: var(--accent-dim);
   color: var(--text);
+}
+.ctrl-btn--reset {
+  border-color: var(--border);
+}
+.ctrl-btn--reset:hover {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
 }
 </style>

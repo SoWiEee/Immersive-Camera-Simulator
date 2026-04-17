@@ -51,19 +51,19 @@
 
 ### 鏡頭系統
 
-- [ ] `data/lenses.ts`：鏡頭資料庫（光圈葉片數、bokeh 形狀偏差、vignette profile、色差強度）
-- [ ] `LensSelector`：名鏡預設選擇 UI（Zeiss Otus 55mm f/1.4、Canon 85mm f/1.2L、Helios 44-2 58mm f/2 等）
-- [ ] `useLens.ts`：鏡頭特性參數管理，傳入 bokeh + vignette + chromAberr shader
-- [ ] `bokeh.wgsl` 更新：多邊形 kernel（光圈葉片形狀）+ 焦外旋轉感（Helios swirl）
+- [x] `data/lenses.ts`：鏡頭資料庫（光圈葉片數、bokeh 形狀偏差、vignette profile、色差強度）
+- [x] `LensSelector`：名鏡預設選擇 UI（Zeiss Otus 55mm f/1.4、Canon 85mm f/1.2L、Helios 44-2 58mm f/2 等）
+- [x] `bokeh.wgsl` 更新：多邊形 kernel（光圈葉片形狀）+ 焦外旋轉感（Helios swirl）
 
 ### 相機 UI
 
 - [ ] 光圈環元件（SVG，可拖轉，刻度卡頓感）
-- [ ] 快門速度轉盤（標準檔位：1/4000, 1/2000 … 1s, B）
-- [ ] ISO 轉盤（100, 200, 400, 800, 1600, 3200, 6400, Auto）
-- [ ] 觀景窗 HUD（f 值 / 快門 / ISO / EV 條）
-- [ ] 對焦點選擇：點擊畫面選取對焦位置，即時更新銳利深度層（從 depth texture 讀取該點深度值）
-- [ ] 焦段選擇（24 / 35 / 50 / 85 / 135mm 預設 + 自訂）
+- [x] 快門速度撥輪（DialWheel，標準檔位：1/4000 ~ 30s，scroll-snap）
+- [x] ISO 撥輪（DialWheel，100 ~ 25600 標準檔位）
+- [x] 觀景窗 HUD（f 值 / 快門 / ISO / EV 條）已在 Phase 2 完成
+- [x] 對焦點選擇：點擊畫面選取對焦位置（已在 Phase 2 完成）
+- [x] 焦段選擇（24 / 28 / 35 / 50 / 58 / 85 / 135 / 200mm 預設 + 滑桿自訂）
+- [x] 重設相機參數按鈕（復原到景深推算完成狀態）
 
 **里程碑**：主要差異化功能完整，可對外展示
 

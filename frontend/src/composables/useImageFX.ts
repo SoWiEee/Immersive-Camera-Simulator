@@ -17,6 +17,7 @@ export function useImageFX(canvas: HTMLCanvasElement) {
     colorTemp,
     iso,
     sensor,
+    lens,
     aperture,
     focusDepth,
     bokehScale,
@@ -43,6 +44,11 @@ export function useImageFX(canvas: HTMLCanvasElement) {
       motionAngle: motionAngle.value,
       motionStrength: motionStrength.value,
       vignetteStrength: vignetteStrength.value,
+      // Lens-specific
+      bladeCount: lens.value.bladeCount,
+      bladeRotation: lens.value.bladeRotation,
+      swirlStrength: lens.value.swirlStrength,
+      chromAberr: lens.value.chromAberrStrength,
     };
   }
 
@@ -85,6 +91,7 @@ export function useImageFX(canvas: HTMLCanvasElement) {
     colorTemp,
     iso,
     sensor,
+    lens,
     aperture,
     focusDepth,
     bokehScale,

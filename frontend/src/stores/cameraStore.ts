@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { SENSORS, DEFAULT_SENSOR_ID } from "@/data/sensors";
+import { LENSES, DEFAULT_LENS_ID } from "@/data/lenses";
 
 export type AppState = "idle" | "loading" | "ready" | "error";
 export type ShootingMode = "M" | "A" | "S" | "P";
@@ -12,6 +13,24 @@ export interface DepthResult {
   height: number;
   inferenceMs: number;
 }
+
+// Default camera param values — used by resetCameraParams()
+const DEFAULTS = {
+  selectedSensorId: DEFAULT_SENSOR_ID,
+  selectedLensId: DEFAULT_LENS_ID,
+  shootingMode: "A" as ShootingMode,
+  aperture: 2.8,
+  shutterSpeed: 1 / 125,
+  iso: 400,
+  focalLength: 50,
+  focusDepth: 0.4,
+  contrast: 1.0,
+  saturation: 1.0,
+  colorTemp: 0.0,
+  vignetteStrength: 0.4,
+  motionAngle: 0.0,
+  motionStrength: 0.0,
+};
 
 export const useCameraStore = defineStore("camera", () => {
   // App lifecycle
@@ -29,28 +48,41 @@ export const useCameraStore = defineStore("camera", () => {
   const webGPUSupported = ref<boolean | null>(null);
 
   // ---- Sensor ----
-  const selectedSensorId = ref<string>(DEFAULT_SENSOR_ID);
+  const selectedSensorId = ref<string>(DEFAULTS.selectedSensorId);
   const sensor = computed(() => SENSORS.find((s) => s.id === selectedSensorId.value) ?? SENSORS[1]);
 
+  // ---- Lens ----
+  const selectedLensId = ref<string>(DEFAULTS.selectedLensId);
+  const lens = computed(() => LENSES.find((l) => l.id === selectedLensId.value) ?? LENSES[0]);
+
+  // When lens changes, sync focal length and clamp aperture to lens range
+  watch(selectedLensId, () => {
+    focalLength.value = lens.value.focalLength;
+    aperture.value = Math.max(
+      lens.value.maxAperture,
+      Math.min(aperture.value, lens.value.minAperture),
+    );
+  });
+
   // ---- Shooting mode ----
-  const shootingMode = ref<ShootingMode>("A");
+  const shootingMode = ref<ShootingMode>(DEFAULTS.shootingMode);
 
   // ---- Exposure triangle ----
-  const aperture = ref<number>(2.8); // f-number (1.4 – 22)
-  const shutterSpeed = ref<number>(1 / 125); // seconds
-  const iso = ref<number>(400); // 100 – 25600
-  const focalLength = ref<number>(50); // mm
+  const aperture = ref<number>(DEFAULTS.aperture); // f-number (1.0 – 22)
+  const shutterSpeed = ref<number>(DEFAULTS.shutterSpeed); // seconds
+  const iso = ref<number>(DEFAULTS.iso); // 100 – 102400
+  const focalLength = ref<number>(DEFAULTS.focalLength); // mm
 
   // ---- Focus ----
-  const focusDepth = ref<number>(0.4); // normalized depth [0, 1]
+  const focusDepth = ref<number>(DEFAULTS.focusDepth); // normalized depth [0, 1]
 
   // ---- Post-process controls ----
-  const contrast = ref<number>(1.0); // 0.5 – 2.0
-  const saturation = ref<number>(1.0); // 0.0 – 2.0
-  const colorTemp = ref<number>(0.0); // -1 = cool, +1 = warm
-  const vignetteStrength = ref<number>(0.4);
-  const motionAngle = ref<number>(0.0); // radians
-  const motionStrength = ref<number>(0.0); // 0 = off
+  const contrast = ref<number>(DEFAULTS.contrast); // 0.5 – 2.0
+  const saturation = ref<number>(DEFAULTS.saturation); // 0.0 – 2.0
+  const colorTemp = ref<number>(DEFAULTS.colorTemp); // -1 = cool, +1 = warm
+  const vignetteStrength = ref<number>(DEFAULTS.vignetteStrength);
+  const motionAngle = ref<number>(DEFAULTS.motionAngle); // radians
+  const motionStrength = ref<number>(DEFAULTS.motionStrength); // 0 = off
 
   // ---- Derived ----
   const equivalentFocalLength = computed(() => focalLength.value * sensor.value.cropFactor);
@@ -64,7 +96,7 @@ export const useCameraStore = defineStore("camera", () => {
   // Exposure delta from EV 13 (sunny outdoor baseline)
   const exposureDelta = computed(() => evAdjusted.value - 13);
 
-  // bokeh scale: how many pixels of blur per unit of depth delta
+  // bokeh scale: pixels of blur per unit of depth delta (capped at 64px in shader)
   const bokehScale = computed(() => {
     const f = focalLength.value;
     const N = aperture.value;
@@ -110,6 +142,24 @@ export const useCameraStore = defineStore("camera", () => {
     }
   }
 
+  // Reset all camera params to defaults while preserving image + depth result
+  function resetCameraParams() {
+    selectedSensorId.value = DEFAULTS.selectedSensorId;
+    selectedLensId.value = DEFAULTS.selectedLensId;
+    shootingMode.value = DEFAULTS.shootingMode;
+    aperture.value = DEFAULTS.aperture;
+    shutterSpeed.value = DEFAULTS.shutterSpeed;
+    iso.value = DEFAULTS.iso;
+    focalLength.value = DEFAULTS.focalLength;
+    focusDepth.value = DEFAULTS.focusDepth;
+    contrast.value = DEFAULTS.contrast;
+    saturation.value = DEFAULTS.saturation;
+    colorTemp.value = DEFAULTS.colorTemp;
+    vignetteStrength.value = DEFAULTS.vignetteStrength;
+    motionAngle.value = DEFAULTS.motionAngle;
+    motionStrength.value = DEFAULTS.motionStrength;
+  }
+
   return {
     // State
     appState,
@@ -121,6 +171,9 @@ export const useCameraStore = defineStore("camera", () => {
     // Sensor
     selectedSensorId,
     sensor,
+    // Lens
+    selectedLensId,
+    lens,
     // Mode
     shootingMode,
     // Exposure triangle
@@ -149,5 +202,6 @@ export const useCameraStore = defineStore("camera", () => {
     setAppState,
     setWebGPUSupported,
     autoComputeExposure,
+    resetCameraParams,
   };
 });

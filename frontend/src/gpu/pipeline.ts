@@ -13,15 +13,15 @@ import vignetteWGSL from "./shaders/vignette.wgsl?raw";
 import blitWGSL from "./shaders/blit.wgsl?raw";
 import { uploadImageBitmap, uploadDepthMapB64, createWorkTextures } from "./textureUtils";
 
-// 64-byte uniform: 12 × f32 + 2 × u32 + 2 × u32 padding
-const UNIFORM_BYTES = 64;
+// 80-byte uniform: 12 × f32 | width u32 | height u32 | bladeCount u32 | blade_rotation f32 | swirl f32 | chromAberr f32 | 2 × u32 pad
+const UNIFORM_BYTES = 80;
 
 export interface CameraRenderParams {
   exposureEv: number; // EV delta from neutral
   contrast: number; // 0.5–2.0
   saturation: number; // 0.0–2.0
   colorTemp: number; // -1 cool … +1 warm
-  iso: number; // 100–25600
+  iso: number; // 100–102400
   noiseCoeff: number; // sensor base noise sigma
   aperture: number; // f-number
   focusDepth: number; // normalized [0,1]
@@ -29,6 +29,11 @@ export interface CameraRenderParams {
   motionAngle: number; // radians
   motionStrength: number; // 0–1
   vignetteStrength: number; // 0–1
+  // Lens params
+  bladeCount: number; // aperture blade count (0 = circular)
+  bladeRotation: number; // polygon rotation offset (radians)
+  swirlStrength: number; // 0 = none, >0 = Helios swirl
+  chromAberr: number; // per-lens chromatic aberration intensity (0–1)
 }
 
 export class CamSimPipeline {
@@ -323,6 +328,7 @@ export class CamSimPipeline {
     const buf = new ArrayBuffer(UNIFORM_BYTES);
     const f = new Float32Array(buf);
     const u = new Uint32Array(buf);
+    // f32 params (offsets 0–44)
     f[0] = p.exposureEv;
     f[1] = p.contrast;
     f[2] = p.saturation;
@@ -335,8 +341,15 @@ export class CamSimPipeline {
     f[9] = p.motionAngle;
     f[10] = p.motionStrength;
     f[11] = p.vignetteStrength;
+    // u32 fields (offsets 48–56)
     u[12] = this.width;
     u[13] = this.height;
+    u[14] = p.bladeCount;
+    // f32 lens fields (offsets 60–68)
+    f[15] = p.bladeRotation;
+    f[16] = p.swirlStrength;
+    f[17] = p.chromAberr;
+    // u[18] and u[19] are zero padding
     this.device.queue.writeBuffer(this.uniformBuf, 0, buf);
   }
 
