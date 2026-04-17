@@ -4,7 +4,7 @@
 
 上傳一張照片，選擇感光元件尺寸與鏡頭，即時看到「手機拍出來的樣子」vs「用全幅單眼拍出來的樣子」——景深、散景、雜訊、色差，全部由物理模型驅動，不是套濾鏡。
 
-<img width="1665" height="999" alt="圖片" src="https://github.com/user-attachments/assets/9b535b1e-716d-45e2-a7be-1908582f11a4" />
+<img width="1665" height="999" alt="圖片" src="https://github.com/user-attachments/assets/22304bfc-40f8-4b69-83b8-cf8733ab47f9" />
 
 **目標**：攝影教學工具 × Portfolio 技術展示。操作體驗接近真實相機，影像效果由 Apple Depth Pro 深度估計 + WebGPU compute shader 驅動。
 
