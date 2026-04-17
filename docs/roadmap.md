@@ -52,8 +52,8 @@
 ### 鏡頭系統
 
 - [x] `data/lenses.ts`：鏡頭資料庫（光圈葉片數、bokeh 形狀偏差、vignette profile、色差強度）
-- [x] `LensSelector`：名鏡預設選擇 UI（Zeiss Otus 55mm f/1.4、Canon 85mm f/1.2L、Helios 44-2 58mm f/2 等）
-- [x] `bokeh.wgsl` 更新：多邊形 kernel（光圈葉片形狀）+ 焦外旋轉感（Helios swirl）
+- [x] `LensSelector`：現代無反入門鏡預設選擇 UI（Canon RF 50/1.8、Nikon Z 40/2、Fuji XF 35/2、Sony FE 50/1.8、Sony FE 85/1.8、Sigma 56/1.4 DC DN）
+- [x] `bokeh.wgsl` 更新：多邊形 kernel（光圈葉片形狀）
 
 ### 相機 UI
 

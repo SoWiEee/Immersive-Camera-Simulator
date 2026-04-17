@@ -83,7 +83,7 @@ blur_radius (px) = |depth_pixel - focus_depth| × bokeh_scale_factor(N, f, senso
 | 5 葉 | 五邊形 | 早期日系鏡頭 |
 | 7 葉 | 七邊形 | Canon L 系列（部分） |
 | 9 葉（圓形） | 圓形 | 現代高端鏡頭，高 f-number 接近圓形 |
-| 自訂渦旋 | 旋轉橢圓 | Helios 44-2（swirl bokeh） |
+| 自訂渦旋 | 旋轉橢圓 | 保留欄位供特殊鏡頭擴充 |
 
 Bokeh kernel 在 `bokeh.wgsl` 中以 Three.js TSL 計算多邊形形狀後傳入，效能敏感的卷積本體為原生 WGSL compute shader。
 
@@ -102,26 +102,32 @@ Bokeh kernel 在 `bokeh.wgsl` 中以 Three.js TSL 計算多邊形形狀後傳入
 
 ```ts
 interface LensProfile {
-  name: string            // 顯示名稱，例如 "Helios 44-2 58mm f/2"
+  id: string              // 唯一識別 ID
+  name: string            // 顯示名稱，例如 "RF 50mm f/1.8 STM"
+  brand: string           // 品牌
   focalLength: number     // 焦距 (mm)
   maxAperture: number     // 最大光圈 f-number
-  blades: number          // 光圈葉片數
-  bokehShape: 'circle' | 'polygon' | 'swirl'
-  swirlStrength?: number  // Helios 渦旋強度（0–1）
+  minAperture: number     // 最小光圈 f-number
+  bladeCount: number      // 光圈葉片數（0 = 圓形虹膜）
+  bladeRotation: number   // 初始多邊形旋轉角（radians）
+  swirlStrength: number   // 渦旋強度（0–1，保留供特殊鏡頭擴充）
+  chromAberrStrength: number // 色差強度係數（0–1）
   vignetteProfile: number // 暗角強度係數（0–1）
-  chromaProfile: number   // 色差強度係數（0–1）
-  characterNote: string   // 給教學 HUD 顯示的鏡頭個性說明
+  bokehShape: 'circle' | 'polygon' | 'swirl'
+  characterNote: string   // 教學 HUD 顯示的鏡頭個性說明
 }
 ```
 
-### 內建名鏡預設
+### 內建鏡頭預設
 
-| 鏡頭 | 特性 |
-|---|---|
-| Zeiss Otus 55mm f/1.4 | 9 葉圓形 bokeh，極低色差，現代感 |
-| Canon EF 85mm f/1.2L | 8 葉，焦外奶油感，輕微色差 |
-| Helios 44-2 58mm f/2 | 8 葉，渦旋 swirl bokeh，復古色調 |
-| Nikkor 50mm f/1.8G | 7 葉，均衡表現，平易近人 |
+| 鏡頭 | 系統 | 特性 |
+|---|---|---|
+| Canon RF 50mm f/1.8 STM | RF (FF) | 9 葉圓形，現代無反入門標準鏡 |
+| Nikon Z 40mm f/2 | Z (FF) | 9 葉，超薄餅鏡，低暗角 |
+| Fujifilm XF 35mm f/2 R WR | X (APS-C) | 9 葉，防塵防水，街拍首選 |
+| Sony FE 50mm f/1.8 | E (FF) | 7 葉多邊形，E-mount 入門定焦 |
+| Sony FE 85mm f/1.8 | E (FF) | 9 葉，平價人像鏡標竿 |
+| Sigma 56mm f/1.4 DC DN | APS-C 通用 | 9 葉，APS-C 人像鏡首選 |
 
 ---
 

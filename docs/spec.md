@@ -222,7 +222,7 @@ interface LensProfile {
 }
 ```
 
-內建鏡頭：Zeiss Otus 55mm f/1.4、Canon EF 85mm f/1.2L、Helios 44-2 58mm f/2、Nikkor 50mm f/1.8G
+內建鏡頭：Canon RF 50mm f/1.8 STM、Nikon Z 40mm f/2、Fujifilm XF 35mm f/2 R WR、Sony FE 50mm f/1.8、Sony FE 85mm f/1.8、Sigma 56mm f/1.4 DC DN
 
 ### 4.4 對焦點選擇邏輯
 
