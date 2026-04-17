@@ -1,8 +1,10 @@
 # 📷 CamSim — Immersive Camera Simulator
 
-A local-first, physically-grounded camera simulator that lets you upload any photo and experience adjusting real camera parameters — aperture, shutter speed, ISO, focal length, shooting mode — with accurate optical effects rendered in real time.
+> **給想買單眼的人：用自己的照片，親眼感受全幅鏡頭景深和手機鏡頭的差距。**
 
-**目標**：教學工具 × Portfolio 技術展示。操作體驗接近真實相機，影像效果由深度估計模型 + WebGPU shader 驅動。
+上傳一張照片，選擇感光元件尺寸與鏡頭，即時看到「手機拍出來的樣子」vs「用全幅單眼拍出來的樣子」——景深、散景、雜訊、色差，全部由物理模型驅動，不是套濾鏡。
+
+**目標**：攝影教學工具 × Portfolio 技術展示。操作體驗接近真實相機，影像效果由 Apple Depth Pro 深度估計 + WebGPU compute shader 驅動。
 
 > 開發路線圖：docs/roadmap.md
 
@@ -14,16 +16,35 @@ A local-first, physically-grounded camera simulator that lets you upload any pho
 
 ## ✨ Features
 
+### 殺手鐧：雙畫面對比 + 參數教學模式
+
+- **左右分割對比**：左側顯示「手機等效效果（小感光元件、大景深、低雜訊曲線）」，右側顯示「你設定的單眼參數效果」，拖動分割線即時對比
+- **參數教學 HUD**：每個參數旁顯示即時文字解說——調整光圈時說明景深變化原理，調整 ISO 時顯示當前感光元件在此 ISO 的訊雜比估算
+
+### 相機操作
+
 - 上傳任意照片，立即進入相機操作介面
 - 擬真相機 UI：可旋轉的光圈環、快門轉盤、ISO 轉盤 + 數值 HUD
 - 拍攝模式：Manual (M) / Aperture Priority (A) / Shutter Priority (S) / Program (P)
-- 景深 / 散景：Apple Depth Pro 推算 depth map，分層套用 bokeh kernel（支援多邊形光圈葉片形狀）
-- 曝光三角：EV、過曝/欠曝警告、即時直方圖
-- ISO 雜訊：基於感光元件尺寸的 luminance noise 模擬
+- 觀景窗 HUD：可點擊的對焦點選擇（即時更新銳利深度層）、曝光計量條
+
+### 感光元件 × 鏡頭系統
+
+- **感光元件型號選擇**：全幅 35mm / APS-C（1.5x/1.6x）/ M43（2x）/ 1-inch（2.7x）——自動換算等效焦距、等效光圈、景深差異
+- **鏡頭角色化**：內建名鏡預設（Zeiss Otus 55mm f/1.4、Canon 85mm f/1.2L、Helios 44-2 58mm f/2 等），各自帶有專屬的光圈葉片形狀、焦外旋轉感、二線性特性
+- 景深 / 散景：Depth Pro 推算 metric depth map，依感光元件尺寸計算真實 CoC，分層 bokeh kernel 支援多邊形光圈葉片
+
+### 光學效果
+
+- 曝光三角：EV 計算、過曝/欠曝警告、即時直方圖
+- ISO 雜訊：基於感光元件物理尺寸的 luminance + chrominance noise 模擬
 - 快門模糊：方向性 motion blur kernel
 - 鏡頭特性：焦段 FOV 裁切、暗角 (vignette)、色差 (chromatic aberration)
-- 觀景窗 HUD：對焦確認點、曝光計量條
-- 本地全端部署，無資料上傳至外部伺服器
+
+### 其他
+
+- 本地全端部署，圖片不上傳至外部伺服器
+- Depth map 以 SHA-256 hash 快取於 IndexedDB，重整後不需重算
 
 ---
 
@@ -83,29 +104,38 @@ docker compose up
 
 ```
 camsim/
-├── frontend/          # Vue 3 + VitePlus+ TypeScript
+├── frontend/          # Vue 3 + VitePlus + TypeScript
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── CameraBody/        # 擬真相機外觀元件（SVG 轉盤、光圈環）
-│   │   │   ├── Viewfinder/        # 觀景窗 + HUD overlay
-│   │   │   ├── ControlPanel/      # 數值輸入面板
+│   │   │   ├── Viewfinder/        # 觀景窗 + 對焦點選擇 + HUD overlay
+│   │   │   ├── CompareView/       # 左右分割對比畫面（手機 vs 單眼）
+│   │   │   ├── ControlPanel/      # 數值輸入面板 + 教學 HUD
+│   │   │   ├── SensorSelector/    # 感光元件型號選擇 + 等效焦距換算顯示
+│   │   │   ├── LensSelector/      # 鏡頭預設選擇（名鏡資料庫）
 │   │   │   └── Histogram/         # 即時直方圖
 │   │   ├── composables/
 │   │   │   ├── useCamera.ts       # 相機狀態機（模式邏輯、曝光計算）
-│   │   │   ├── useDepthMap.ts     # depth map 請求 + 快取
-│   │   │   └── useImageFX.ts      # WebGPU effect pipeline 控制
+│   │   │   ├── useSensor.ts       # 感光元件物理參數（CoC、crop factor、noise curve）
+│   │   │   ├── useLens.ts         # 鏡頭特性資料（bokeh shape、vignette profile）
+│   │   │   ├── useDepthMap.ts     # depth map 請求 + IndexedDB 快取
+│   │   │   ├── useImageFX.ts      # WebGPU effect pipeline 控制
+│   │   │   └── useCompare.ts      # 雙畫面對比狀態（分割位置、手機基準渲染）
+│   │   ├── data/
+│   │   │   ├── sensors.ts         # 感光元件資料庫（尺寸、pixel pitch、noise 曲線）
+│   │   │   └── lenses.ts          # 鏡頭資料庫（焦距、光圈葉片、bokeh 特性參數）
 │   │   ├── gpu/
 │   │   │   ├── pipeline.ts        # WebGPU device + pipeline 初始化
 │   │   │   ├── shaders/
 │   │   │   │   ├── exposure.wgsl      # 曝光、白平衡、色調
-│   │   │   │   ├── noise.wgsl         # ISO 雜訊（Perlin + Gaussian）
-│   │   │   │   ├── bokeh.wgsl         # 分層散景卷積（多邊形 kernel）
+│   │   │   │   ├── noise.wgsl         # ISO 雜訊（sensor-aware luminance + chrominance）
+│   │   │   │   ├── bokeh.wgsl         # 分層散景卷積（多邊形 kernel + depthWeightedBlend）
 │   │   │   │   ├── motionBlur.wgsl    # 快門動態模糊
 │   │   │   │   ├── vignette.wgsl      # 暗角
 │   │   │   │   └── chromAberr.wgsl    # 色差
 │   │   │   └── textureUtils.ts    # 圖片 / depth map → GPU texture
 │   │   └── stores/
-│   │       └── cameraStore.ts     # Pinia 全域狀態
+│   │       └── cameraStore.ts     # Pinia 全域狀態（相機、感光元件、鏡頭、對比模式）
 │   └── public/
 │
 ├── backend/           # Python FastAPI
@@ -126,21 +156,35 @@ camsim/
 ```
 使用者上傳圖片
     │
+    ├─→ SHA-256 hash → IndexedDB 查詢
+    │       命中 → 直接還原 depth map，跳過後端
+    │       未命中 ↓
+    │
     ├─→ [Backend] POST /api/depth
-    │       Depth Pro 推論 → 輸出 16-bit PNG depth map
-    │       回傳 base64 depth map + 推算焦距(f_px)
+    │       Depth Pro 推論 → 輸出 16-bit PNG depth map + 推算焦距(f_px)
+    │       結果存入 IndexedDB
     │
     └─→ [Frontend] 圖片 + depth map → WebGPU textures
             │
-            使用者調整任意參數（即時）
+            ┌──────────────────────────────────────┐
+            │  使用者選擇感光元件 + 鏡頭 + 調整參數  │
+            └──────────────────────────────────────┘
             │
-            WebGPU compute shader pipeline：
-            exposure → noise → bokeh(depth-aware) → motionBlur → vignette → chromAberr
+            並行渲染兩條 pipeline：
             │
-            Canvas 顯示結果
+            ├─→ [左側] 手機基準 pipeline（固定小感光元件參數）
+            │       exposure → noise(phone) → bokeh(shallow CoC) → vignette
+            │
+            └─→ [右側] 單眼模擬 pipeline（使用者設定）
+                    exposure → noise(sensor-aware) → bokeh(depth-aware, lens profile)
+                    → motionBlur → vignette → chromAberr
+            │
+            CompareView 合成左右畫面，依分割線位置顯示
+            │
+            教學 HUD 疊加：即時顯示當前參數的物理意義說明
 ```
 
-**關鍵設計**：depth map 只在上傳時計算一次（~1-2 秒），之後所有參數調整都在前端 WebGPU 即時運算，無額外後端請求。
+**關鍵設計**：depth map 只在首次上傳時計算一次（~1-2 秒），快取於 IndexedDB；左右兩側 pipeline 共用同一份 depth texture，無額外後端請求。
 
 ---
 
