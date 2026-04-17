@@ -43,11 +43,11 @@
 
 ### 殺手鐧功能
 
-- [ ] `CompareView`：左右分割畫面，左側固定手機基準 pipeline，右側單眼模擬 pipeline，分割線可拖動
-- [ ] 手機基準 pipeline 參數（小感光元件、大景深、手機 noise curve，固定不讓使用者調整）
-- [ ] 參數教學 HUD：每個參數旁顯示即時物理意義說明（調光圈時說明景深變化、調 ISO 顯示訊雜比估算）
-- [ ] `SensorSelector`：感光元件型號選擇，連動顯示等效焦距換算結果
-- [ ] `useCompare.ts`：雙 pipeline 狀態管理（分割位置、手機基準渲染參數）
+- [x] `CompareView`：左右分割畫面，左側固定手機基準 pipeline，右側單眼模擬 pipeline，分割線可拖動
+- [x] 手機基準 pipeline 參數（小感光元件、大景深、手機 noise curve，固定不讓使用者調整）
+- [x] 參數教學 HUD：每個參數旁顯示即時物理意義說明（DoF 分類 + 等效全幅光圈 + 超焦距 + SNR + 安全快門）
+- [x] `SensorSelector`：感光元件型號選擇，連動顯示等效焦距 + CoC（整合在 Viewfinder 側欄）
+- [x] `useCompare.ts`：雙 pipeline 狀態管理（分割位置、手機基準渲染參數）
 
 ### 鏡頭系統
 
@@ -57,7 +57,7 @@
 
 ### 相機 UI
 
-- [ ] 光圈環元件（SVG，可拖轉，刻度卡頓感）
+- [x] 光圈環元件（SVG，可拖轉，270° 弧刻度，snap 至最近檔位）
 - [x] 快門速度撥輪（DialWheel，標準檔位：1/4000 ~ 30s，scroll-snap）
 - [x] ISO 撥輪（DialWheel，100 ~ 25600 標準檔位）
 - [x] 觀景窗 HUD（f 值 / 快門 / ISO / EV 條）已在 Phase 2 完成

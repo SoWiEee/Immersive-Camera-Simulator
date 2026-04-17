@@ -6,6 +6,8 @@ import { useImageFX } from "@/composables/useImageFX";
 import { SENSORS } from "@/data/sensors";
 import DialWheel, { type DialStop } from "@/components/DialWheel/DialWheel.vue";
 import LensSelector from "@/components/LensSelector/LensSelector.vue";
+import ApertureRing from "@/components/ApertureRing/ApertureRing.vue";
+import CompareView from "@/components/CompareView/CompareView.vue";
 
 const store = useCameraStore();
 const {
@@ -29,12 +31,20 @@ const {
   selectedSensorId,
   selectedLensId,
   lens,
+  sensor,
+  compareMode,
 } = storeToRefs(store);
 
+// ---- Single-view pipeline (used when compareMode = false) ----
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 let fx: ReturnType<typeof useImageFX> | null = null;
 
 onMounted(async () => {
+  if (compareMode.value || !canvasRef.value) return;
+  await initSinglePipeline();
+});
+
+async function initSinglePipeline() {
   if (!canvasRef.value) return;
   try {
     fx = useImageFX(canvasRef.value);
@@ -45,26 +55,32 @@ onMounted(async () => {
   } catch (e) {
     store.setAppState("error", `WebGPU pipeline error: ${e}`);
   }
-});
+}
 
 watch(depthResult, async (result) => {
-  if (!fx || !result || !imageFile.value) return;
+  if (compareMode.value || !fx || !result || !imageFile.value) return;
   await fx.loadImageAndDepth(imageFile.value, result.depthMapB64);
 });
 
-// Click canvas to set focus depth from depth map
+// Click on single canvas for focus picking
 function onCanvasClick(event: MouseEvent) {
   if (!fx || !canvasRef.value) return;
   const rect = canvasRef.value.getBoundingClientRect();
-  const scaleX = canvasRef.value.width / rect.width;
-  const scaleY = canvasRef.value.height / rect.height;
-  const px = (event.clientX - rect.left) * scaleX;
-  const py = (event.clientY - rect.top) * scaleY;
-  const depth = fx.pickFocusDepth(px, py);
+  const depth = fx.pickFocusDepth(
+    (event.clientX - rect.left) * (canvasRef.value.width / rect.width),
+    (event.clientY - rect.top) * (canvasRef.value.height / rect.height),
+  );
   if (depth !== null) focusDepth.value = depth;
 }
 
-// ---- Shutter speed dial stops ----
+// Re-init single pipeline when switching away from compare mode
+watch(compareMode, async (isCompare) => {
+  if (!isCompare) {
+    await initSinglePipeline();
+  }
+});
+
+// ---- Dial stops ----
 const SHUTTER_STOPS: DialStop[] = [
   { value: 1 / 4000, label: "1/4000" },
   { value: 1 / 2000, label: "1/2000" },
@@ -86,22 +102,12 @@ const SHUTTER_STOPS: DialStop[] = [
   { value: 30, label: '30"' },
 ];
 
-// ---- ISO dial stops ----
 const ISO_STOPS: DialStop[] = [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600].map((v) => ({
   value: v,
   label: String(v),
 }));
 
-// ---- Focal length presets ----
 const FL_PRESETS = [24, 28, 35, 50, 58, 85, 135, 200];
-
-// ---- Aperture f-stop presets from current lens range ----
-const apertureStops = computed(() => {
-  const stops = [1.0, 1.2, 1.4, 1.8, 2.0, 2.8, 4, 5.6, 8, 11, 16, 22];
-  return stops
-    .filter((f) => f >= lens.value.maxAperture - 0.05 && f <= lens.value.minAperture + 0.05)
-    .map((v) => ({ value: v, label: `f/${v}` }));
-});
 
 // ---- EV display ----
 const evBarWidth = computed(() => {
@@ -117,9 +123,43 @@ const evBarColor = computed(() => {
 
 function formatShutter(s: number): string {
   if (s >= 0.5) return `${s.toFixed(1)}s`;
-  const denom = Math.round(1 / s);
-  return `1/${denom}`;
+  return `1/${Math.round(1 / s)}`;
 }
+
+// ---- Teaching HUD physics calculations ----
+
+// Equivalent full-frame aperture (same DoF on FF)
+const ffEquivAperture = computed(() => aperture.value * sensor.value.cropFactor);
+
+// DoF feel classification based on effective aperture
+const dofFeel = computed(() => {
+  const ne = ffEquivAperture.value;
+  if (ne < 2) return "極淺景深";
+  if (ne < 4) return "淺景深";
+  if (ne < 8) return "中景深";
+  return "深景深";
+});
+
+// Hyperfocal distance in meters: H = f² / (N × c)  (f in mm, c in mm)
+const hyperfocalM = computed(() => {
+  const f = focalLength.value;
+  const N = aperture.value;
+  const c = sensor.value.cocMm;
+  return (f * f) / (N * c) / 1000; // mm → m
+});
+
+// Sensor noise SNR estimate (dB)
+const snrDb = computed(() => {
+  const isoStops = Math.log2(iso.value / 100 + 1);
+  const intensity = sensor.value.isoBaseNoise * isoStops * 1.8;
+  if (intensity <= 0) return 99;
+  return Math.round(20 * Math.log10(1 / intensity));
+});
+
+// Safe shutter speed (reciprocal rule): 1 / (focalLength × cropFactor)
+const safeShutterS = computed(() => 1 / (focalLength.value * sensor.value.cropFactor));
+const isShutterSafe = computed(() => shutterSpeed.value <= safeShutterS.value * 1.5);
+const safeShutterLabel = computed(() => `1/${Math.round(1 / safeShutterS.value)}`);
 
 function onNewPhoto() {
   store.setAppState("idle");
@@ -132,23 +172,49 @@ function onReset() {
 
 <template>
   <div class="viewfinder">
-    <!-- Canvas area -->
+    <!-- ---- Canvas area ---- -->
     <div class="viewfinder__canvas-wrap">
-      <canvas
-        ref="canvasRef"
-        class="viewfinder__canvas"
-        :class="{ 'viewfinder__canvas--clickable': appState === 'ready' }"
-        @click="onCanvasClick"
-      />
-      <div v-if="appState === 'loading'" class="viewfinder__overlay">
-        <span class="viewfinder__spinner" />
-        <p>景深推算中…</p>
-      </div>
-      <div v-if="appState === 'ready'" class="viewfinder__hint">點擊畫面選取對焦點</div>
+      <!-- Compare mode: two pipelines with split line -->
+      <CompareView v-if="compareMode && appState === 'ready'" />
+
+      <!-- Single-view mode -->
+      <template v-if="!compareMode || appState === 'loading'">
+        <canvas
+          ref="canvasRef"
+          class="viewfinder__canvas"
+          :class="{ 'viewfinder__canvas--clickable': appState === 'ready' && !compareMode }"
+          @click="onCanvasClick"
+        />
+        <div v-if="appState === 'loading'" class="viewfinder__overlay">
+          <span class="viewfinder__spinner" />
+          <p>景深推算中…</p>
+        </div>
+        <div v-if="appState === 'ready' && !compareMode" class="viewfinder__hint">
+          點擊畫面選取對焦點
+        </div>
+      </template>
     </div>
 
-    <!-- Controls sidebar -->
+    <!-- ---- Controls sidebar ---- -->
     <aside class="controls" v-if="appState === 'ready'">
+      <!-- Compare mode toggle -->
+      <div class="ctrl-group ctrl-group--row">
+        <button
+          class="mode-btn"
+          :class="{ 'mode-btn--active': compareMode }"
+          @click="compareMode = true"
+        >
+          ⊟ 對比模式
+        </button>
+        <button
+          class="mode-btn"
+          :class="{ 'mode-btn--active': !compareMode }"
+          @click="compareMode = false"
+        >
+          ◻ 單畫面
+        </button>
+      </div>
+
       <!-- EV meter -->
       <div class="ctrl-group">
         <div class="ctrl-label">
@@ -191,16 +257,16 @@ function onReset() {
         <select class="ctrl-select" v-model="selectedSensorId">
           <option v-for="s in SENSORS" :key="s.id" :value="s.id">{{ s.name }}</option>
         </select>
-        <p class="ctrl-hint">等效焦距：{{ equivalentFocalLength.toFixed(0) }} mm</p>
+        <p class="ctrl-physics">等效焦距 × {{ sensor.cropFactor }} · CoC {{ sensor.cocMm }}mm</p>
       </div>
 
-      <!-- ---- Lens selector ---- -->
+      <!-- Lens selector -->
       <details class="ctrl-details">
-        <summary class="ctrl-summary">鏡頭選擇 — {{ lens.name }}</summary>
+        <summary class="ctrl-summary">鏡頭 — {{ lens.name }}</summary>
         <LensSelector v-model="selectedLensId" />
       </details>
 
-      <!-- Aperture f-stop presets -->
+      <!-- Aperture ring + f-stop presets -->
       <div
         class="ctrl-group"
         :class="{ 'ctrl-group--disabled': shootingMode === 'S' || shootingMode === 'P' }"
@@ -208,21 +274,22 @@ function onReset() {
         <div class="ctrl-label">
           光圈 <span class="ctrl-value">f/{{ aperture.toFixed(1) }}</span>
         </div>
-        <div class="preset-row">
-          <button
-            v-for="stop in apertureStops"
-            :key="stop.value"
-            class="preset-btn"
-            :class="{ 'preset-btn--active': Math.abs(aperture - stop.value) < 0.05 }"
-            @click="
-              aperture = stop.value;
+        <ApertureRing
+          v-model="aperture"
+          :min="lens.maxAperture"
+          :max="lens.minAperture"
+          :disabled="shootingMode === 'S' || shootingMode === 'P'"
+          @update:model-value="
+            (v) => {
+              aperture = v;
               store.autoComputeExposure();
-            "
-          >
-            f/{{ stop.value }}
-          </button>
-        </div>
-        <p class="ctrl-hint">小 f 值 → 淺景深・更大散景</p>
+            }
+          "
+        />
+        <p class="ctrl-physics">
+          {{ dofFeel }} · 等效全幅 f/{{ ffEquivAperture.toFixed(1) }} · 超焦距
+          {{ hyperfocalM.toFixed(0) }}m
+        </p>
       </div>
 
       <!-- Shutter speed dial -->
@@ -245,7 +312,10 @@ function onReset() {
             }
           "
         />
-        <p class="ctrl-hint">慢快門 → 更多動態模糊・曝光增加</p>
+        <p class="ctrl-physics" :class="{ 'ctrl-physics--warn': !isShutterSafe }">
+          安全快門 {{ safeShutterLabel }}s
+          {{ isShutterSafe ? "✓" : "▲ 可能手震" }}
+        </p>
       </div>
 
       <!-- ISO dial -->
@@ -264,7 +334,7 @@ function onReset() {
             }
           "
         />
-        <p class="ctrl-hint">高 ISO → 更多雜訊・感光度提升</p>
+        <p class="ctrl-physics">訊雜比 ≈ {{ snrDb }} dB</p>
       </div>
 
       <!-- Focal length presets -->
@@ -272,7 +342,7 @@ function onReset() {
         <div class="ctrl-label">
           焦段
           <span class="ctrl-value"
-            >{{ focalLength }}mm (等效 {{ equivalentFocalLength.toFixed(0) }}mm)</span
+            >{{ focalLength }}mm (≡{{ equivalentFocalLength.toFixed(0) }}mm)</span
           >
         </div>
         <div class="preset-row">
@@ -312,7 +382,7 @@ function onReset() {
         <p class="ctrl-hint">或點擊畫面選取對焦點</p>
       </div>
 
-      <!-- ---- Advanced ---- -->
+      <!-- Advanced settings -->
       <details class="ctrl-details">
         <summary class="ctrl-summary">進階設定</summary>
 
@@ -329,7 +399,6 @@ function onReset() {
             v-model.number="contrast"
           />
         </div>
-
         <div class="ctrl-group">
           <div class="ctrl-label">
             飽和度 <span class="ctrl-value">{{ saturation.toFixed(2) }}</span>
@@ -343,13 +412,12 @@ function onReset() {
             v-model.number="saturation"
           />
         </div>
-
         <div class="ctrl-group">
           <div class="ctrl-label">
             色溫
-            <span class="ctrl-value"
-              >{{ colorTemp >= 0 ? "暖" : "冷" }} {{ Math.abs(colorTemp).toFixed(2) }}</span
-            >
+            <span class="ctrl-value">
+              {{ colorTemp >= 0 ? "暖" : "冷" }} {{ Math.abs(colorTemp).toFixed(2) }}
+            </span>
           </div>
           <input
             type="range"
@@ -360,7 +428,6 @@ function onReset() {
             v-model.number="colorTemp"
           />
         </div>
-
         <div class="ctrl-group">
           <div class="ctrl-label">
             暗角 <span class="ctrl-value">{{ vignetteStrength.toFixed(2) }}</span>
@@ -374,10 +441,9 @@ function onReset() {
             v-model.number="vignetteStrength"
           />
         </div>
-
         <div class="ctrl-group">
           <div class="ctrl-label">
-            動態模糊強度 <span class="ctrl-value">{{ motionStrength.toFixed(2) }}</span>
+            動態模糊 <span class="ctrl-value">{{ motionStrength.toFixed(2) }}</span>
           </div>
           <input
             type="range"
@@ -388,7 +454,6 @@ function onReset() {
             v-model.number="motionStrength"
           />
         </div>
-
         <div class="ctrl-group" v-if="motionStrength > 0">
           <div class="ctrl-label">
             模糊方向
@@ -516,6 +581,10 @@ function onReset() {
   opacity: 0.4;
   pointer-events: none;
 }
+.ctrl-group--row {
+  flex-direction: row;
+  gap: 6px;
+}
 
 .ctrl-label {
   display: flex;
@@ -545,6 +614,17 @@ function onReset() {
   margin: 0;
 }
 
+/* Physics teaching hint (cyan tint) */
+.ctrl-physics {
+  font-size: 10px;
+  color: #5bc4d8;
+  line-height: 1.5;
+  margin: 0;
+}
+.ctrl-physics--warn {
+  color: #ff9933;
+}
+
 .ctrl-select {
   width: 100%;
   background: var(--bg);
@@ -562,18 +642,19 @@ function onReset() {
 }
 .mode-btn {
   flex: 1;
-  padding: 5px 0;
+  padding: 5px 4px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition:
     border-color 0.1s,
     color 0.1s,
     background 0.1s;
+  white-space: nowrap;
 }
 .mode-btn--active {
   border-color: var(--accent);
@@ -581,7 +662,7 @@ function onReset() {
   background: rgba(255, 153, 51, 0.08);
 }
 
-/* Preset button rows (aperture f-stops, focal length) */
+/* Preset button rows */
 .preset-row {
   display: flex;
   flex-wrap: wrap;
@@ -693,9 +774,6 @@ details[open] .ctrl-summary::before {
 .ctrl-btn:hover {
   border-color: var(--accent-dim);
   color: var(--text);
-}
-.ctrl-btn--reset {
-  border-color: var(--border);
 }
 .ctrl-btn--reset:hover {
   border-color: #ff6b6b;

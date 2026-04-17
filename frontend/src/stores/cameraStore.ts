@@ -47,6 +47,9 @@ export const useCameraStore = defineStore("camera", () => {
   // WebGPU support
   const webGPUSupported = ref<boolean | null>(null);
 
+  // Compare mode: show phone-baseline vs user-settings split view
+  const compareMode = ref<boolean>(true);
+
   // ---- Sensor ----
   const selectedSensorId = ref<string>(DEFAULTS.selectedSensorId);
   const sensor = computed(() => SENSORS.find((s) => s.id === selectedSensorId.value) ?? SENSORS[1]);
@@ -200,6 +203,7 @@ export const useCameraStore = defineStore("camera", () => {
     setImage,
     setDepthResult,
     setAppState,
+    compareMode,
     setWebGPUSupported,
     autoComputeExposure,
     resetCameraParams,
