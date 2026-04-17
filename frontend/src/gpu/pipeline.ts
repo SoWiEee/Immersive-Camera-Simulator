@@ -1,71 +1,86 @@
 /**
- * pipeline.ts
- * Central WebGPU device + pipeline manager for Phase 1.
+ * pipeline.ts — Phase 2 WebGPU shader chain
  *
- * Responsibilities:
- *  - Device / adapter initialisation
- *  - Texture lifecycle (image, depth, work ping-pong)
- *  - Compute pipeline: two-pass separable Gaussian blur
- *  - Render pipeline: blit work texture → canvas
+ * Pass order: exposure → noise → bokeh → motionBlur → vignette → blit
+ * Work textures ping-pong: image→[0]→[1]→[0]→[1]→[0]→canvas
  */
 
-import gaussianWGSL from './shaders/gaussian.wgsl?raw'
-import blitWGSL from './shaders/blit.wgsl?raw'
-import {
-  uploadImageBitmap,
-  uploadDepthMapB64,
-  createWorkTextures,
-} from './textureUtils'
+import exposureWGSL from "./shaders/exposure.wgsl?raw";
+import noiseWGSL from "./shaders/noise.wgsl?raw";
+import bokehWGSL from "./shaders/bokeh.wgsl?raw";
+import motionBlurWGSL from "./shaders/motionBlur.wgsl?raw";
+import vignetteWGSL from "./shaders/vignette.wgsl?raw";
+import blitWGSL from "./shaders/blit.wgsl?raw";
+import { uploadImageBitmap, uploadDepthMapB64, createWorkTextures } from "./textureUtils";
 
-// Uniform layout: radius (u32) + horizontal (u32) = 8 bytes → pad to 16
-const UNIFORM_SIZE = 16
+// 64-byte uniform: 12 × f32 + 2 × u32 + 2 × u32 padding
+const UNIFORM_BYTES = 64;
+
+export interface CameraRenderParams {
+  exposureEv: number; // EV delta from neutral
+  contrast: number; // 0.5–2.0
+  saturation: number; // 0.0–2.0
+  colorTemp: number; // -1 cool … +1 warm
+  iso: number; // 100–25600
+  noiseCoeff: number; // sensor base noise sigma
+  aperture: number; // f-number
+  focusDepth: number; // normalized [0,1]
+  bokehScale: number; // pixels per unit depth delta
+  motionAngle: number; // radians
+  motionStrength: number; // 0–1
+  vignetteStrength: number; // 0–1
+}
 
 export class CamSimPipeline {
-  private device: GPUDevice
-  private context: GPUCanvasContext
-  private canvasFormat: GPUTextureFormat
+  private device: GPUDevice;
+  private context: GPUCanvasContext;
+  private canvasFormat: GPUTextureFormat;
 
   // Textures
-  private imageTexture: GPUTexture | null = null
-  private depthTexture: GPUTexture | null = null
-  private workTexA: GPUTexture | null = null // horizontal output
-  private workTexB: GPUTexture | null = null // vertical output
+  private imageTexture: GPUTexture | null = null;
+  private depthTexture: GPUTexture | null = null;
+  private workTex: [GPUTexture | null, GPUTexture | null] = [null, null];
 
-  // Pipelines
-  private gaussianPipeline!: GPUComputePipeline
-  private blitPipeline!: GPURenderPipeline
+  // CPU-side depth data for focus picking
+  private depthData: Float32Array | null = null;
+
+  // Shared uniform buffer
+  private uniformBuf!: GPUBuffer;
 
   // Bind group layouts
-  private gaussianBGL!: GPUBindGroupLayout
-  private blitBGL!: GPUBindGroupLayout
+  private standardBGL!: GPUBindGroupLayout; // in, out, params
+  private bokehBGL!: GPUBindGroupLayout; // in, depth, out, params
+  private blitBGL!: GPUBindGroupLayout; // texture, sampler
 
-  // Sampler
-  private linearSampler!: GPUSampler
+  // Compute pipelines
+  private exposurePipeline!: GPUComputePipeline;
+  private noisePipeline!: GPUComputePipeline;
+  private bokehPipeline!: GPUComputePipeline;
+  private motionBlurPipeline!: GPUComputePipeline;
+  private vignettePipeline!: GPUComputePipeline;
 
-  // Uniforms
-  private uniformBuffer!: GPUBuffer
+  // Render pipeline
+  private blitPipeline!: GPURenderPipeline;
+  private linearSampler!: GPUSampler;
 
-  private width = 0
-  private height = 0
+  private width = 0;
+  private height = 0;
 
   // ---------------------------------------------------------------- factory
 
   static async create(canvas: HTMLCanvasElement): Promise<CamSimPipeline> {
-    if (!navigator.gpu) throw new Error('WebGPU not supported')
+    if (!navigator.gpu) throw new Error("WebGPU not supported");
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error("No WebGPU adapter found");
+    const device = await adapter.requestDevice();
+    const context = canvas.getContext("webgpu");
+    if (!context) throw new Error("Could not get WebGPU context");
+    const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format: canvasFormat, alphaMode: "opaque" });
 
-    const adapter = await navigator.gpu.requestAdapter()
-    if (!adapter) throw new Error('No WebGPU adapter found')
-
-    const device = await adapter.requestDevice()
-    const context = canvas.getContext('webgpu')
-    if (!context) throw new Error('Could not get WebGPU context from canvas')
-
-    const canvasFormat = navigator.gpu.getPreferredCanvasFormat()
-    context.configure({ device, format: canvasFormat, alphaMode: 'opaque' })
-
-    const inst = new CamSimPipeline(device, context, canvasFormat)
-    inst.buildPipelines()
-    return inst
+    const inst = new CamSimPipeline(device, context, canvasFormat);
+    inst.buildPipelines();
+    return inst;
   }
 
   private constructor(
@@ -73,182 +88,265 @@ export class CamSimPipeline {
     context: GPUCanvasContext,
     canvasFormat: GPUTextureFormat,
   ) {
-    this.device = device
-    this.context = context
-    this.canvasFormat = canvasFormat
+    this.device = device;
+    this.context = context;
+    this.canvasFormat = canvasFormat;
   }
 
-  // ---------------------------------------------------------------- pipelines
+  // ---------------------------------------------------------------- build
 
   private buildPipelines(): void {
-    const { device } = this
+    const { device } = this;
 
-    // Uniform buffer (shared by both blur passes)
-    this.uniformBuffer = device.createBuffer({
-      size: UNIFORM_SIZE,
+    this.uniformBuf = device.createBuffer({
+      size: UNIFORM_BYTES,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    })
+    });
 
-    // Sampler
-    this.linearSampler = device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear',
-    })
+    this.linearSampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
 
-    // ---- Gaussian compute pipeline ----
-    this.gaussianBGL = device.createBindGroupLayout({
+    // Standard BGL: input (float), output (storage rgba16float), params uniform
+    this.standardBGL = device.createBindGroupLayout({
       entries: [
-        { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float' } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: "write-only", format: "rgba16float" },
+        },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
       ],
-    })
+    });
 
-    const gaussianModule = device.createShaderModule({ code: gaussianWGSL })
-    this.gaussianPipeline = device.createComputePipeline({
-      layout: device.createPipelineLayout({ bindGroupLayouts: [this.gaussianBGL] }),
-      compute: { module: gaussianModule, entryPoint: 'main' },
-    })
+    // Bokeh BGL: input, depth (unfilterable-float), output, params
+    this.bokehBGL = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType: "unfilterable-float" },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: "write-only", format: "rgba16float" },
+        },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+      ],
+    });
 
-    // ---- Blit render pipeline ----
+    // Blit BGL: texture + sampler
     this.blitBGL = device.createBindGroupLayout({
       entries: [
-        { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
       ],
-    })
+    });
 
-    const blitModule = device.createShaderModule({ code: blitWGSL })
+    const stdLayout = device.createPipelineLayout({ bindGroupLayouts: [this.standardBGL] });
+    const bokehLayout = device.createPipelineLayout({ bindGroupLayouts: [this.bokehBGL] });
+    const blitLayout = device.createPipelineLayout({ bindGroupLayouts: [this.blitBGL] });
+
+    const mkCompute = (code: string, layout: GPUPipelineLayout) =>
+      device.createComputePipeline({
+        layout,
+        compute: { module: device.createShaderModule({ code }), entryPoint: "main" },
+      });
+
+    this.exposurePipeline = mkCompute(exposureWGSL, stdLayout);
+    this.noisePipeline = mkCompute(noiseWGSL, stdLayout);
+    this.bokehPipeline = mkCompute(bokehWGSL, bokehLayout);
+    this.motionBlurPipeline = mkCompute(motionBlurWGSL, stdLayout);
+    this.vignettePipeline = mkCompute(vignetteWGSL, stdLayout);
+
+    const blitMod = device.createShaderModule({ code: blitWGSL });
     this.blitPipeline = device.createRenderPipeline({
-      layout: device.createPipelineLayout({ bindGroupLayouts: [this.blitBGL] }),
-      vertex: { module: blitModule, entryPoint: 'vs_main' },
+      layout: blitLayout,
+      vertex: { module: blitMod, entryPoint: "vs_main" },
       fragment: {
-        module: blitModule,
-        entryPoint: 'fs_main',
+        module: blitMod,
+        entryPoint: "fs_main",
         targets: [{ format: this.canvasFormat }],
       },
-      primitive: { topology: 'triangle-list' },
-    })
+      primitive: { topology: "triangle-list" },
+    });
   }
 
-  // ---------------------------------------------------------------- load image
+  // ---------------------------------------------------------------- load
 
   async loadImage(file: File): Promise<void> {
-    const bitmap = await createImageBitmap(file)
-    this.width = bitmap.width
-    this.height = bitmap.height
+    const bitmap = await createImageBitmap(file);
+    this.width = bitmap.width;
+    this.height = bitmap.height;
 
-    // Resize canvas pixel buffer to match image — preserves aspect ratio when CSS uses max-width/max-height
-    const canvas = this.context.canvas as HTMLCanvasElement
-    canvas.width = this.width
-    canvas.height = this.height
+    const canvas = this.context.canvas as HTMLCanvasElement;
+    canvas.width = this.width;
+    canvas.height = this.height;
 
-    this.imageTexture?.destroy()
-    this.imageTexture = uploadImageBitmap(this.device, bitmap)
-    bitmap.close()
-
-    this.recreateWorkTextures()
+    this.imageTexture?.destroy();
+    this.imageTexture = uploadImageBitmap(this.device, bitmap);
+    bitmap.close();
+    this.recreateWorkTextures();
   }
 
   async loadDepthMap(b64: string): Promise<void> {
-    this.depthTexture?.destroy()
-    this.depthTexture = await uploadDepthMapB64(
-      this.device,
-      b64,
-      this.width,
-      this.height,
-    )
+    this.depthTexture?.destroy();
+    const result = await uploadDepthMapB64(this.device, b64, this.width, this.height);
+    this.depthTexture = result.texture;
+    this.depthData = result.floats;
+  }
+
+  /** Return the depth value [0,1] at canvas coordinates (x, y). */
+  sampleDepthAt(x: number, y: number): number | null {
+    if (!this.depthData || this.width === 0) return null;
+    const px = Math.floor(Math.max(0, Math.min(x, this.width - 1)));
+    const py = Math.floor(Math.max(0, Math.min(y, this.height - 1)));
+    return this.depthData[py * this.width + px];
   }
 
   private recreateWorkTextures(): void {
-    this.workTexA?.destroy()
-    this.workTexB?.destroy()
-    ;[this.workTexA, this.workTexB] = createWorkTextures(
-      this.device,
-      this.width,
-      this.height,
-    )
+    this.workTex[0]?.destroy();
+    this.workTex[1]?.destroy();
+    [this.workTex[0], this.workTex[1]] = createWorkTextures(this.device, this.width, this.height);
   }
 
   // ---------------------------------------------------------------- render
 
-  render(blurRadius: number): void {
-    if (!this.imageTexture || !this.workTexA || !this.workTexB) return
+  render(params: CameraRenderParams): void {
+    if (!this.imageTexture || !this.workTex[0] || !this.workTex[1] || !this.depthTexture) return;
 
-    const { device } = this
-    const encoder = device.createCommandEncoder()
+    this.writeUniforms(params);
+    const { device } = this;
+    const encoder = device.createCommandEncoder();
+    const wx = Math.ceil(this.width / 16);
+    const wy = Math.ceil(this.height / 16);
 
-    const wx = Math.ceil(this.width / 16)
-    const wy = Math.ceil(this.height / 16)
+    // Pass 1 — exposure: image → work[0]
+    this.dispatchStandard(encoder, this.exposurePipeline, this.imageTexture, this.workTex[0]!);
+    encoder.beginComputePass().end(); // noop; ensures barrier via pass boundary
 
-    // Pass 0: horizontal blur — image → workTexA
-    this.writeUniforms(blurRadius, 1)
-    const bgH = this.makeGaussianBG(this.imageTexture, this.workTexA)
-    const passH = encoder.beginComputePass()
-    passH.setPipeline(this.gaussianPipeline)
-    passH.setBindGroup(0, bgH)
-    passH.dispatchWorkgroups(wx, wy)
-    passH.end()
+    // Pass 2 — noise: work[0] → work[1]
+    const noisePass = encoder.beginComputePass();
+    noisePass.setPipeline(this.noisePipeline);
+    noisePass.setBindGroup(0, this.makeStandardBG(this.workTex[0]!, this.workTex[1]!));
+    noisePass.dispatchWorkgroups(wx, wy);
+    noisePass.end();
 
-    // Pass 1: vertical blur — workTexA → workTexB
-    this.writeUniforms(blurRadius, 0)
-    const bgV = this.makeGaussianBG(this.workTexA, this.workTexB)
-    const passV = encoder.beginComputePass()
-    passV.setPipeline(this.gaussianPipeline)
-    passV.setBindGroup(0, bgV)
-    passV.dispatchWorkgroups(wx, wy)
-    passV.end()
+    // Pass 3 — bokeh: work[1] + depth → work[0]
+    const bokehPass = encoder.beginComputePass();
+    bokehPass.setPipeline(this.bokehPipeline);
+    bokehPass.setBindGroup(0, this.makeBokehBG(this.workTex[1]!, this.workTex[0]!));
+    bokehPass.dispatchWorkgroups(wx, wy);
+    bokehPass.end();
 
-    // Blit workTexB → canvas
-    const canvasTex = this.context.getCurrentTexture()
+    // Pass 4 — motion blur: work[0] → work[1]
+    const mbPass = encoder.beginComputePass();
+    mbPass.setPipeline(this.motionBlurPipeline);
+    mbPass.setBindGroup(0, this.makeStandardBG(this.workTex[0]!, this.workTex[1]!));
+    mbPass.dispatchWorkgroups(wx, wy);
+    mbPass.end();
+
+    // Pass 5 — vignette: work[1] → work[0]
+    const vigPass = encoder.beginComputePass();
+    vigPass.setPipeline(this.vignettePipeline);
+    vigPass.setBindGroup(0, this.makeStandardBG(this.workTex[1]!, this.workTex[0]!));
+    vigPass.dispatchWorkgroups(wx, wy);
+    vigPass.end();
+
+    // Blit work[0] → canvas
+    const canvasTex = this.context.getCurrentTexture();
     const blitBG = device.createBindGroup({
       layout: this.blitBGL,
       entries: [
-        { binding: 0, resource: this.workTexB.createView() },
+        { binding: 0, resource: this.workTex[0]!.createView() },
         { binding: 1, resource: this.linearSampler },
       ],
-    })
+    });
     const renderPass = encoder.beginRenderPass({
-      colorAttachments: [{
-        view: canvasTex.createView(),
-        loadOp: 'clear',
-        storeOp: 'store',
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-      }],
-    })
-    renderPass.setPipeline(this.blitPipeline)
-    renderPass.setBindGroup(0, blitBG)
-    renderPass.draw(6)
-    renderPass.end()
+      colorAttachments: [
+        {
+          view: canvasTex.createView(),
+          loadOp: "clear",
+          storeOp: "store",
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        },
+      ],
+    });
+    renderPass.setPipeline(this.blitPipeline);
+    renderPass.setBindGroup(0, blitBG);
+    renderPass.draw(6);
+    renderPass.end();
 
-    device.queue.submit([encoder.finish()])
+    device.queue.submit([encoder.finish()]);
   }
 
   // ---------------------------------------------------------------- helpers
 
-  private writeUniforms(radius: number, horizontal: number): void {
-    const data = new Uint32Array([Math.max(1, Math.min(radius, 64)), horizontal, 0, 0])
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, data)
+  private dispatchStandard(
+    encoder: GPUCommandEncoder,
+    pipeline: GPUComputePipeline,
+    input: GPUTexture,
+    output: GPUTexture,
+  ): void {
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, this.makeStandardBG(input, output));
+    pass.dispatchWorkgroups(Math.ceil(this.width / 16), Math.ceil(this.height / 16));
+    pass.end();
   }
 
-  private makeGaussianBG(input: GPUTexture, output: GPUTexture): GPUBindGroup {
+  private makeStandardBG(input: GPUTexture, output: GPUTexture): GPUBindGroup {
     return this.device.createBindGroup({
-      layout: this.gaussianBGL,
+      layout: this.standardBGL,
       entries: [
         { binding: 0, resource: input.createView() },
         { binding: 1, resource: output.createView() },
-        { binding: 2, resource: { buffer: this.uniformBuffer } },
+        { binding: 2, resource: { buffer: this.uniformBuf } },
       ],
-    })
+    });
+  }
+
+  private makeBokehBG(input: GPUTexture, output: GPUTexture): GPUBindGroup {
+    return this.device.createBindGroup({
+      layout: this.bokehBGL,
+      entries: [
+        { binding: 0, resource: input.createView() },
+        { binding: 1, resource: this.depthTexture!.createView() },
+        { binding: 2, resource: output.createView() },
+        { binding: 3, resource: { buffer: this.uniformBuf } },
+      ],
+    });
+  }
+
+  private writeUniforms(p: CameraRenderParams): void {
+    const buf = new ArrayBuffer(UNIFORM_BYTES);
+    const f = new Float32Array(buf);
+    const u = new Uint32Array(buf);
+    f[0] = p.exposureEv;
+    f[1] = p.contrast;
+    f[2] = p.saturation;
+    f[3] = p.colorTemp;
+    f[4] = p.iso;
+    f[5] = p.noiseCoeff;
+    f[6] = p.aperture;
+    f[7] = p.focusDepth;
+    f[8] = p.bokehScale;
+    f[9] = p.motionAngle;
+    f[10] = p.motionStrength;
+    f[11] = p.vignetteStrength;
+    u[12] = this.width;
+    u[13] = this.height;
+    this.device.queue.writeBuffer(this.uniformBuf, 0, buf);
   }
 
   // ---------------------------------------------------------------- cleanup
 
   destroy(): void {
-    this.imageTexture?.destroy()
-    this.depthTexture?.destroy()
-    this.workTexA?.destroy()
-    this.workTexB?.destroy()
-    this.uniformBuffer?.destroy()
+    this.imageTexture?.destroy();
+    this.depthTexture?.destroy();
+    this.workTex[0]?.destroy();
+    this.workTex[1]?.destroy();
+    this.uniformBuf?.destroy();
   }
 }

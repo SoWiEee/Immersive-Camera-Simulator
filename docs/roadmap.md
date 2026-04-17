@@ -22,16 +22,16 @@
 
 **目標：曝光三角全部可調，景深物理正確**
 
-- [ ] `exposure.wgsl`：亮度、對比、色溫、飽和度
-- [ ] `noise.wgsl`：ISO 雜訊（sensor-aware：luminance + chrominance，依感光元件物理尺寸調整係數）
-- [ ] `bokeh.wgsl`：depth-aware 分層卷積，圓形 kernel + `depthWeightedBlend`（抑制 edge bleeding）
-- [ ] `motionBlur.wgsl`：方向 + 強度控制
-- [ ] `vignette.wgsl`：焦段連動的暗角強度
-- [ ] 曝光計算邏輯（`useCamera.ts`）
-- [ ] 拍攝模式（M / A / S / P）自動計算邏輯
+- [x] `exposure.wgsl`：亮度、對比、色溫、飽和度
+- [x] `noise.wgsl`：ISO 雜訊（sensor-aware：luminance + chrominance，依感光元件物理尺寸調整係數）
+- [x] `bokeh.wgsl`：depth-aware 分層卷積，Fibonacci spiral disc kernel + `depthWeightedBlend`（抑制 edge bleeding）
+- [x] `motionBlur.wgsl`：方向 + 強度控制
+- [x] `vignette.wgsl`：焦段連動的暗角強度 + 輕微色差
+- [x] 曝光計算邏輯（cameraStore 內建 EV₁₀₀ / evAdjusted / exposureDelta computed）
+- [x] 拍攝模式（M / A / S / P）自動計算邏輯（autoComputeExposure）
 - [ ] 即時直方圖（WebGPU compute 讀取亮度分布）
-- [ ] `data/sensors.ts`：感光元件資料庫（FF / APS-C 1.5x / APS-C 1.6x / M43 / 1-inch 的物理尺寸、CoC、noise curve 係數）
-- [ ] `useSensor.ts`：crop factor、等效焦距換算、CoC 計算
+- [x] `data/sensors.ts`：感光元件資料庫（FF / APS-C 1.5x / APS-C 1.6x / M43 / 1-inch 的物理尺寸、CoC、noise curve 係數）
+- [x] `useSensor.ts`：crop factor、等效焦距換算、CoC 計算
 
 **里程碑**：調整所有參數都有視覺上物理正確的即時反饋
 
