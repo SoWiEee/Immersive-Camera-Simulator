@@ -31,43 +31,36 @@ A local-first, physically-grounded camera simulator that lets you upload any pho
 
 ### Prerequisites
 
+- 套件管理器 [uv](https://docs.astral.sh/uv/getting-started/installation/)，前端工具鏈 [vite-plus](https://viteplus.dev/guide/)
+
 ```bash
 python --version  # Python 3.12+
 node --version    # Node.js 20+
 nvidia-smi        # CUDA 12.x
-
-# 安裝 uv（Python 套件管理）
-pip install uv
-
-# 安裝 VitePlus（前端工具鏈）
-npm install -g vite-plus
 ```
 
 ### Backend
 
-- http://localhost:8000
+- 後端伺服器：http://localhost:8000
 
 ```bash
 cd backend
-
-# 安裝依賴（uv 會自動建立 .venv，速度比 pip 快 10-100x）
 uv sync
 
 # 下載 Depth Pro 模型權重（約 2.5GB）
 uv run python scripts/download_model.py
 
-# 啟動開發伺服器
 uv run uvicorn main:app --reload --port 8000
 ```
 
 ### Frontend
 
-- http://localhost:5173
+- 開發伺服器：http://localhost:5173
 
 ```bash
 cd frontend
 vp install    # 安裝依賴
-vp dev        # 啟動開發伺服器 → http://localhost:5173
+vp dev        # 啟動開發伺服器
 
 vp check      # 一次執行 format + lint + type-check
 vp test       # 執行單元測試
@@ -77,7 +70,6 @@ vp build      # 生產環境打包
 ### Docker（推薦本地部署方式）
 
 ```bash
-# 啟動全端（使用 Docker Compose v2 plugin 語法）
 docker compose up
 
 # 前端 → http://localhost:5173
@@ -91,7 +83,7 @@ docker compose up
 
 ```
 camsim/
-├── frontend/          # Vue 3 + Vite + TypeScript
+├── frontend/          # Vue 3 + VitePlus+ TypeScript
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── CameraBody/        # 擬真相機外觀元件（SVG 轉盤、光圈環）
