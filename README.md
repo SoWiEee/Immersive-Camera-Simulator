@@ -219,11 +219,92 @@ camsim/
 | **Apple Depth Pro** (`ml-depth-pro`) | latest | 深度估計模型 | 比 Depth Anything V2 在邊緣細節更銳利，輸出 metric depth（真實公尺單位），同時推算焦距，0.3s/張（V100），GTX 1650 Ti 約 1-2s。注意：官方主要測試平台為 Linux + Apple Silicon，Windows + CUDA 環境需參考 [社群安裝指南](#depth-pro-windows) |
 | PyTorch | ^2.5.1 + CUDA 12.4 | 模型推論 | — |
 | Pillow | ^11.x | 圖片前處理 | — |
-| NumPy | ~2.1 | Depth map 後處理 | 固定在 2.1.x：PyTorch 2.5.1 官方支援 NumPy ≥1.26 及 2.x，但 NumPy 2.2+ 尚有 API 異動風險，使用 `~2.1` 確保相容 |
+| NumPy | >=1.26,<2.0 | Depth map 後處理 | `ml-depth-pro` 內部使用 NumPy 1.x API（`np.bool` 等），強制鎖定 1.x；`uv sync` 後請確認 `numpy<2.0` |
 | python-multipart | ^0.0.12 | 檔案上傳解析 | — |
 
 > **為什麼 Depth Pro 而非 Depth Anything V2？**
 > Depth Anything V2 輸出 relative depth（相對值），需要額外校正才能對應真實物理距離。Apple Depth Pro 直接輸出 metric depth（公尺）且同時估算畫面焦距，對「模擬真實焦段變化影響景深」這個需求更直接有用。GTX 1650 Ti 的 4GB VRAM 可以跑 Depth Pro（模型約 2.5GB）。
+
+---
+
+## ⚠️ 已知坑點（Windows + CUDA）
+
+實際安裝過程踩過的坑，按嚴重程度排列：
+
+### 1. torch + depth_pro 安裝順序必須正確
+
+`ml-depth-pro` 沒有把 torch 列為 dependency，但如果你先裝 depth_pro 再裝 torch，可能裝到 CPU-only 版本。**正確順序：先裝 CUDA torch，再裝 depth_pro。**
+
+```bash
+cd backend
+
+# Step 1：CUDA torch（先裝）
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+# Step 2：depth_pro（後裝）
+uv pip install git+https://github.com/apple/ml-depth-pro.git
+
+# Step 3：確認 CUDA 可用
+uv run python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
+# 預期輸出：True  12.6
+```
+
+### 2. NumPy 2.x 與 depth_pro 不相容
+
+`ml-depth-pro` 內部仍使用 NumPy 1.x 的 API（如 `np.bool`、`np.int`），安裝時會自動降版。`pyproject.toml` 已鎖定 `numpy>=1.26,<2.0`，但若手動 `uv pip install numpy` 升版會導致推論時 crash：
+
+```
+AttributeError: module 'numpy' has no attribute 'bool'
+```
+
+確認方法：
+
+```bash
+uv run python -c "import numpy; print(numpy.__version__)"
+# 應輸出 1.26.x
+```
+
+### 3. VRAM 不足導致推論卡住（GTX 1650 / 4GB 顯卡）
+
+Depth Pro 模型本身佔約 **3.6GB VRAM**，GTX 1650 4GB 的餘裕只有 ~400MB。輸入圖片過大時，推論的暫時 tensor 會溢出到系統 RAM，造成速度慢 30-50x、電腦整體卡頓。
+
+本專案已自動處理此問題：
+- **前端**：上傳前縮圖到 ≤2048px（`useDepthMap.ts`）
+- **後端**：推論前縮圖到 ≤1536px，推論後立即 `torch.cuda.empty_cache()`（`depth_service.py`）
+
+如果推論仍然過慢（> 30s），請檢查顯示卡驅動是否支援 CUDA 12.x，或考慮使用 CPU fallback：
+
+```bash
+# 強制 CPU（慢，但不受 VRAM 限制）
+uv pip install torch torchvision  # CPU-only 版本
+```
+
+### 4. depth_pro config API 用法（踩坑記錄）
+
+`DepthProConfig` 有多個 required positional args，不能直接 `DepthProConfig(checkpoint_uri=...)` 初始化。正確用法是 `dataclasses.replace`：
+
+```python
+# ❌ 錯誤：TypeError: missing positional arguments
+config = DepthProConfig(checkpoint_uri=str(CHECKPOINT_PATH))
+
+# ✓ 正確：
+from depth_pro.depth_pro import DEFAULT_MONODEPTH_CONFIG_DICT
+import dataclasses
+config = dataclasses.replace(DEFAULT_MONODEPTH_CONFIG_DICT, checkpoint_uri=str(CHECKPOINT_PATH))
+```
+
+### 5. Windows 上重啟後端（pkill 無效）
+
+Windows git bash 沒有 `pkill`，uvicorn 掛掉或 port 被占時：
+
+```bash
+# 找到並殺掉所有 python 行程
+taskkill /IM python.exe /F
+
+# 或指定 PID（先用 netstat 找）
+netstat -ano | findstr :8000
+taskkill /PID <PID> /F
+```
 
 ---
 
