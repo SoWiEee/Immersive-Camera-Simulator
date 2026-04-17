@@ -112,49 +112,83 @@ class DepthService:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, cls._run_inference, image_bytes)
 
+    # Depth Pro internally runs at 1536×1536; feeding larger images only inflates
+    # VRAM for preprocessing without improving depth quality.
+    MAX_INFER_DIM = 1536
+
     @classmethod
     def _run_inference(cls, image_bytes: bytes) -> dict:
         pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        w, h = pil_image.size
+        orig_w, orig_h = pil_image.size
+
+        # Downscale for inference if the image is larger than the model's native res
+        scale = min(cls.MAX_INFER_DIM / max(orig_w, orig_h), 1.0)
+        if scale < 1.0:
+            infer_w = round(orig_w * scale)
+            infer_h = round(orig_h * scale)
+            infer_image = pil_image.resize((infer_w, infer_h), Image.LANCZOS)
+            logger.info("Resized %dx%d → %dx%d for inference", orig_w, orig_h, infer_w, infer_h)
+        else:
+            infer_image = pil_image
 
         if cls._model_loaded:
-            return cls._depth_pro_infer(pil_image, w, h)
-        return cls._luminance_fallback(pil_image, w, h)
+            result = cls._depth_pro_infer(infer_image, orig_w, orig_h)
+        else:
+            result = cls._luminance_fallback(infer_image, orig_w, orig_h)
+
+        return result
 
     # ------------------------------------------------------------------ depth pro path
 
     @classmethod
-    def _depth_pro_infer(cls, pil_image: Image.Image, w: int, h: int) -> dict:
-        # depth_pro expects float32 numpy (H, W, 3) in [0, 1], same as load_rgb output
+    def _depth_pro_infer(cls, pil_image: Image.Image, orig_w: int, orig_h: int) -> dict:
+        infer_w, infer_h = pil_image.size
         img_np = np.array(pil_image, dtype=np.float32) / 255.0
 
-        with torch.no_grad():
+        with torch.inference_mode():
             transformed = cls._transform(img_np)
             prediction = cls._model.infer(transformed, f_px=None)
 
         depth_m: np.ndarray = prediction["depth"].squeeze().cpu().numpy()
+
+        # Release inference tensors immediately to free VRAM
+        if _TORCH_AVAILABLE:
+            torch.cuda.empty_cache()
+
         focal_px = prediction.get("focallength_px")
-        focal_length_px = float(focal_px.item() if focal_px is not None else max(w, h) * 0.7)
+        # Scale focal length to original image coordinates
+        focal_infer = float(focal_px.item() if focal_px is not None else max(infer_w, infer_h) * 0.7)
+        scale_back = max(orig_w, orig_h) / max(infer_w, infer_h)
+        focal_length_px = focal_infer * scale_back
+
+        # Upsample depth map back to original resolution so it aligns with the image texture
+        if (infer_w, infer_h) != (orig_w, orig_h):
+            depth_pil = Image.fromarray(depth_m.astype(np.float32))
+            depth_pil = depth_pil.resize((orig_w, orig_h), Image.BILINEAR)
+            depth_m = np.array(depth_pil)
 
         return {
             "depth_map_b64": cls._depth_to_b64_png(depth_m),
             "focal_length_px": focal_length_px,
-            "width": w,
-            "height": h,
+            "width": orig_w,
+            "height": orig_h,
         }
 
     # ------------------------------------------------------------------ luminance fallback
 
     @classmethod
-    def _luminance_fallback(cls, pil_image: Image.Image, w: int, h: int) -> dict:
+    def _luminance_fallback(cls, pil_image: Image.Image, orig_w: int, orig_h: int) -> dict:
         gray = np.array(pil_image.convert("L"), dtype=np.float32) / 255.0
         depth_m = 1.0 - gray  # bright = far, dark = near
-        logger.info("Returned luminance fallback depth map (%dx%d)", w, h)
+        if (pil_image.width, pil_image.height) != (orig_w, orig_h):
+            depth_pil = Image.fromarray(depth_m.astype(np.float32))
+            depth_m = np.array(depth_pil.resize((orig_w, orig_h), Image.BILINEAR))
+        logger.info("Returned luminance fallback depth map (%dx%d)", orig_w, orig_h)
         return {
             "depth_map_b64": cls._depth_to_b64_png(depth_m),
-            "focal_length_px": max(w, h) * 0.7,
-            "width": w,
-            "height": h,
+            "focal_length_px": max(orig_w, orig_h) * 0.7,
+            "width": orig_w,
+            "height": orig_h,
         }
 
     # ------------------------------------------------------------------ helpers

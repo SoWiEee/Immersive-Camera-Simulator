@@ -67,11 +67,34 @@ async function sha256hex(buffer: ArrayBuffer): Promise<string> {
     .join("");
 }
 
+// ---------------------------------------------------------------- resize helper
+
+// Downscale to ≤ MAX_UPLOAD_DIM before sending to keep memory pressure low.
+// The original File is still used for cache hashing.
+const MAX_UPLOAD_DIM = 2048;
+
+async function resizeForUpload(file: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(MAX_UPLOAD_DIM / Math.max(bitmap.width, bitmap.height), 1.0);
+  if (scale === 1.0) {
+    bitmap.close();
+    return file;
+  }
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+  const oc = new OffscreenCanvas(w, h);
+  const ctx = oc.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  return oc.convertToBlob({ type: "image/jpeg", quality: 0.92 });
+}
+
 // ---------------------------------------------------------------- API call
 
 async function fetchDepth(file: File): Promise<ApiResponse> {
+  const uploadBlob = await resizeForUpload(file);
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", uploadBlob, file.name);
   const res = await fetch("/api/depth", { method: "POST", body: form });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
