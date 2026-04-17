@@ -16,7 +16,7 @@
 
 ## ✨ Features
 
-### 殺手鐧：雙畫面對比 + 參數教學模式
+### 雙畫面對比 + 參數教學模式
 
 - **左右分割對比**：左側顯示「手機等效效果（小感光元件、大景深、低雜訊曲線）」，右側顯示「你設定的單眼參數效果」，拖動分割線即時對比
 - **參數教學 HUD**：每個參數旁顯示即時文字解說——調整光圈時說明景深變化原理，調整 ISO 時顯示當前感光元件在此 ISO 的訊雜比估算
@@ -48,7 +48,7 @@
 
 ---
 
-## ⚙️ Local Setup
+## 🚀 Getting Started
 
 ### Prerequisites
 
@@ -74,6 +74,8 @@ uv run python scripts/download_model.py
 uv run uvicorn main:app --reload --port 8000
 ```
 
+> ⚠️ 注意在 Windows + CUDA 環境下，`ml-depth-pro` 沒有把 torch 列為 dependency，但如果你先裝 depth_pro 再裝 torch，可能裝到 CPU-only 版本。正確順序是先裝 CUDA torch，再裝 depth_pro。
+
 ### Frontend
 
 - 開發伺服器：http://localhost:5173
@@ -88,7 +90,7 @@ vp test       # 執行單元測試
 vp build      # 生產環境打包
 ```
 
-### Docker（推薦本地部署方式）
+### Docker（working...）
 
 ```bash
 docker compose up
@@ -103,7 +105,7 @@ docker compose up
 ## 🏗️ Architecture
 
 ```
-camsim/
+Immersive-Camera-Simulator/
 ├── frontend/          # Vue 3 + VitePlus + TypeScript
 │   ├── src/
 │   │   ├── components/
@@ -198,56 +200,30 @@ camsim/
 | VitePlus | latest | 統一工具鏈入口 | 整合 Vite 6、Vitest、Oxlint、Oxfmt、Rolldown，一個指令取代 npm/eslint/prettier |
 | Vite | ^6.x | Build tool（由 VitePlus 管理） | 極速 HMR，原生 ESM；VitePlus 底層使用 Rolldown 作為 bundler |
 | TypeScript | ^5.6 | 型別安全 | 需求指定 |
-| Pinia | ^2.x | 狀態管理 | Vue 官方推薦，比 Vuex 輕 |
-| WebGPU API | native | GPU 影像處理 | Compute shader 支援，比 WebGL2 快 10x+，Chrome 113+ 預設啟用 |
+| Pinia | ^2.x | 狀態管理 | Vue 官方維護與推薦 |
+| WebGPU API | native | GPU 影像處理 | Compute shader 支援，比 WebGL2 快 10x+ |
 | Three.js r168+ (WebGPU renderer) | ^0.168 | TSL shader 輔助（限 bokeh kernel 原型） | 僅用於以 TypeScript 語法撰寫 bokeh polygon kernel；曝光、noise、vignette 等效能敏感 pass 直接寫原生 WGSL |
 | VueUse | ^11.x | Composable 工具集 | usePointer、useResizeObserver 等省時 |
-| Vitest | ^2.x | 單元測試（由 VitePlus `vp test` 驅動） | Vite 原生整合，VitePlus 統一管理 |
-| Oxlint + Oxfmt | via VitePlus | Linting + Formatting | Rust 實作，比 ESLint + Prettier 快 50-100x，`vp check` 一次執行 |
+| Vitest | ^2.x | 單元測試（由 VitePlus 驅動） | Vite 原生整合，VitePlus 統一管理 |
+| Oxlint + Oxfmt | via VitePlus | Linting + Formatting | Rust 實作，比 ESLint + Prettier 快 50-100x |
 
-> **為什麼 WebGPU 而非 WebGL2？**
-> WebGL2 沒有 compute pipeline，做卷積模糊只能透過 fragment shader 把矩陣塞進 texture，迂迴且有記憶體限制。WebGPU compute shader 直接操作 buffer，bokeh 卷積核可以做到更大 kernel size 而不掉幀。Chrome 113+ 已預設啟用，覆蓋率足夠本地部署場景使用。
 
 ### Backend
 
 | 套件 | 版本 | 用途 | 選擇理由 |
 |---|---|---|---|
 | Python | ^3.12 | 後端語言 | — |
-| uv | latest | 套件管理 + 虛擬環境 | 比 pip 快 10-100x，`uv sync` 取代 `pip install -r requirements.txt`，使用 `pyproject.toml` + `uv.lock` |
+| uv | latest | 套件管理 + 虛擬環境 | 比 pip 快 10-100x |
 | FastAPI | ^0.115 | API 框架 | 你已有經驗，async 支援好 |
 | Uvicorn | ^0.32 | ASGI server | — |
-| **Apple Depth Pro** (`ml-depth-pro`) | latest | 深度估計模型 | 比 Depth Anything V2 在邊緣細節更銳利，輸出 metric depth（真實公尺單位），同時推算焦距，0.3s/張（V100），GTX 1650 Ti 約 1-2s。注意：官方主要測試平台為 Linux + Apple Silicon，Windows + CUDA 環境需參考 [社群安裝指南](#depth-pro-windows) |
+| **Apple Depth Pro** | latest | 深度估計模型 | 比 Depth Anything V2 在邊緣細節更銳利，輸出 metric depth（真實公尺單位），同時推算焦距，0.3s/張（V100），GTX 1650 Ti 約 1-2s。注意：官方主要測試平台為 Linux + Apple Silicon，Windows + CUDA 環境需參考 [社群安裝指南](#depth-pro-windows) |
 | PyTorch | ^2.5.1 + CUDA 12.4 | 模型推論 | — |
 | Pillow | ^11.x | 圖片前處理 | — |
-| NumPy | >=1.26,<2.0 | Depth map 後處理 | `ml-depth-pro` 內部使用 NumPy 1.x API（`np.bool` 等），強制鎖定 1.x；`uv sync` 後請確認 `numpy<2.0` |
+| NumPy | >=1.26,<2.0 | Depth map 後處理 | `ml-depth-pro` 內部使用 NumPy 1.x API（`np.bool` 等），強制鎖定 1.x |
 | python-multipart | ^0.0.12 | 檔案上傳解析 | — |
 
 > **為什麼 Depth Pro 而非 Depth Anything V2？**
 > Depth Anything V2 輸出 relative depth（相對值），需要額外校正才能對應真實物理距離。Apple Depth Pro 直接輸出 metric depth（公尺）且同時估算畫面焦距，對「模擬真實焦段變化影響景深」這個需求更直接有用。GTX 1650 Ti 的 4GB VRAM 可以跑 Depth Pro（模型約 2.5GB）。
-
----
-
-## ⚠️ 已知坑點（Windows + CUDA）
-
-實際安裝過程踩過的坑，按嚴重程度排列：
-
-### torch + depth_pro 安裝順序必須正確
-
-`ml-depth-pro` 沒有把 torch 列為 dependency，但如果你先裝 depth_pro 再裝 torch，可能裝到 CPU-only 版本。**正確順序：先裝 CUDA torch，再裝 depth_pro。**
-
-```bash
-cd backend
-
-# Step 1：CUDA torch（先裝）
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-
-# Step 2：depth_pro（後裝）
-uv pip install git+https://github.com/apple/ml-depth-pro.git
-
-# Step 3：確認 CUDA 可用
-uv run python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
-# 預期輸出：True  12.6
-```
 
 ---
 
