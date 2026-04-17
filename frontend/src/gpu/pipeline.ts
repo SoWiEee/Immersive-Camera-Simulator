@@ -138,6 +138,11 @@ export class CamSimPipeline {
     this.width = bitmap.width
     this.height = bitmap.height
 
+    // Resize canvas pixel buffer to match image — preserves aspect ratio when CSS uses max-width/max-height
+    const canvas = this.context.canvas as HTMLCanvasElement
+    canvas.width = this.width
+    canvas.height = this.height
+
     this.imageTexture?.destroy()
     this.imageTexture = uploadImageBitmap(this.device, bitmap)
     bitmap.close()

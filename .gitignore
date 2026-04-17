@@ -4,3 +4,15 @@ node_modules/
 
 CLAUDE.md
 .claude/
+
+# Python
+.venv/
+*.pyc
+uv.lock
+
+# Model weights (large binary files)
+backend/models/
+
+# Frontend build / lock
+frontend/package-lock.json
+frontend/dist/
