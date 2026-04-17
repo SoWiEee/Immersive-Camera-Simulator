@@ -74,7 +74,7 @@ uv run python scripts/download_model.py
 uv run uvicorn main:app --reload --port 8000
 ```
 
-> ⚠️ 注意在 Windows + CUDA 環境下，`ml-depth-pro` 沒有把 torch 列為 dependency，但如果你先裝 depth_pro 再裝 torch，可能裝到 CPU-only 版本。正確順序是先裝 CUDA torch，再裝 depth_pro。
+> ⚠️ 注意在 Windows + CUDA 環境下，`ml-depth-pro` 沒有把 torch 列為 dependency，但如果你先裝 depth_pro 再裝 torch，可能裝到 CPU-only 版本。正確順序是先裝 CUDA torch，再裝 [depth_pro](https://github.com/apple/ml-depth-pro)。
 
 ### Frontend
 
