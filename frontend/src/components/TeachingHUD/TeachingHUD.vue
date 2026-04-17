@@ -229,10 +229,10 @@ const sensorSizeMm2 = computed(() => {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 300px;
-  background: rgba(10, 10, 12, 0.92);
-  backdrop-filter: blur(12px);
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  width: 420px;
+  background: rgba(10, 10, 12, 0.94);
+  backdrop-filter: blur(16px);
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
   display: flex;
   flex-direction: column;
   z-index: 20;
@@ -240,13 +240,13 @@ const sensorSizeMm2 = computed(() => {
 }
 
 .hud-header {
-  padding: 14px 16px 10px;
+  padding: 16px 20px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   flex-shrink: 0;
 }
 .hud-title {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--accent);
   letter-spacing: 0.08em;
@@ -254,42 +254,42 @@ const sensorSizeMm2 = computed(() => {
 }
 .hud-subtitle {
   display: block;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
-  margin-top: 2px;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 3px;
+  letter-spacing: 0.03em;
 }
 
 .hud-cards {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 12px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
 
 .hud-card {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 14px 16px;
 }
 
 .hud-card__head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 7px;
+  margin-bottom: 8px;
 }
 .hud-card__icon {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
 }
 .hud-card__name {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -297,19 +297,19 @@ const sensorSizeMm2 = computed(() => {
 }
 
 .hud-card__value {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
   font-family: monospace;
   color: #fff;
   line-height: 1.2;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 .hud-card__value-sub {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 400;
   color: rgba(255, 255, 255, 0.45);
   font-family: sans-serif;
@@ -318,37 +318,37 @@ const sensorSizeMm2 = computed(() => {
 .hud-card__stats {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 .stat {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 13px;
 }
 .stat__label {
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.4);
 }
 .stat__val {
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.85);
   font-variant-numeric: tabular-nums;
   font-family: monospace;
-  font-size: 10.5px;
+  font-size: 13px;
 }
 .stat__val.accent {
   color: var(--accent);
 }
 
 .hud-card__note {
-  font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.38);
-  line-height: 1.55;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1.6;
   margin: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 10px;
 }
 .hud-card__note strong {
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.7);
 }
 </style>

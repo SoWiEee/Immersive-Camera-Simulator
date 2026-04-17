@@ -128,41 +128,6 @@ function formatShutter(s: number): string {
   return `1/${Math.round(1 / s)}`;
 }
 
-// ---- Teaching HUD physics calculations ----
-
-// Equivalent full-frame aperture (same DoF on FF)
-const ffEquivAperture = computed(() => aperture.value * sensor.value.cropFactor);
-
-// DoF feel classification based on effective aperture
-const dofFeel = computed(() => {
-  const ne = ffEquivAperture.value;
-  if (ne < 2) return "極淺景深";
-  if (ne < 4) return "淺景深";
-  if (ne < 8) return "中景深";
-  return "深景深";
-});
-
-// Hyperfocal distance in meters: H = f² / (N × c)  (f in mm, c in mm)
-const hyperfocalM = computed(() => {
-  const f = focalLength.value;
-  const N = aperture.value;
-  const c = sensor.value.cocMm;
-  return (f * f) / (N * c) / 1000; // mm → m
-});
-
-// Sensor noise SNR estimate (dB)
-const snrDb = computed(() => {
-  const isoStops = Math.log2(iso.value / 100 + 1);
-  const intensity = sensor.value.isoBaseNoise * isoStops * 1.8;
-  if (intensity <= 0) return 99;
-  return Math.round(20 * Math.log10(1 / intensity));
-});
-
-// Safe shutter speed (reciprocal rule): 1 / (focalLength × cropFactor)
-const safeShutterS = computed(() => 1 / (focalLength.value * sensor.value.cropFactor));
-const isShutterSafe = computed(() => shutterSpeed.value <= safeShutterS.value * 1.5);
-const safeShutterLabel = computed(() => `1/${Math.round(1 / safeShutterS.value)}`);
-
 function onNewPhoto() {
   store.setAppState("idle");
 }
@@ -270,7 +235,6 @@ function onReset() {
         <select class="ctrl-select" v-model="selectedSensorId">
           <option v-for="s in SENSORS" :key="s.id" :value="s.id">{{ s.name }}</option>
         </select>
-        <p class="ctrl-physics">等效焦距 × {{ sensor.cropFactor }} · CoC {{ sensor.cocMm }}mm</p>
       </div>
 
       <!-- Lens selector -->
@@ -299,10 +263,6 @@ function onReset() {
             }
           "
         />
-        <p class="ctrl-physics">
-          {{ dofFeel }} · 等效全幅 f/{{ ffEquivAperture.toFixed(1) }} · 超焦距
-          {{ hyperfocalM.toFixed(0) }}m
-        </p>
       </div>
 
       <!-- Shutter speed dial -->
@@ -325,10 +285,6 @@ function onReset() {
             }
           "
         />
-        <p class="ctrl-physics" :class="{ 'ctrl-physics--warn': !isShutterSafe }">
-          安全快門 {{ safeShutterLabel }}s
-          {{ isShutterSafe ? "✓" : "▲ 可能手震" }}
-        </p>
       </div>
 
       <!-- ISO dial -->
@@ -347,7 +303,6 @@ function onReset() {
             }
           "
         />
-        <p class="ctrl-physics">訊雜比 ≈ {{ snrDb }} dB</p>
       </div>
 
       <!-- Focal length presets -->
@@ -653,17 +608,6 @@ function onReset() {
   color: var(--text-dim);
   line-height: 1.5;
   margin: 0;
-}
-
-/* Physics teaching hint (cyan tint) */
-.ctrl-physics {
-  font-size: 10px;
-  color: #5bc4d8;
-  line-height: 1.5;
-  margin: 0;
-}
-.ctrl-physics--warn {
-  color: #ff9933;
 }
 
 .ctrl-select {
