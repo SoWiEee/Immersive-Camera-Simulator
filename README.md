@@ -4,6 +4,12 @@ A local-first, physically-grounded camera simulator that lets you upload any pho
 
 **目標**：教學工具 × Portfolio 技術展示。操作體驗接近真實相機，影像效果由深度估計模型 + WebGPU shader 驅動。
 
+> 開發路線圖：docs/roadmap.md
+
+> API 文件：docs/api.md
+
+> 相機模擬設計：docs/camera.md
+
 ---
 
 ## ✨ Features
