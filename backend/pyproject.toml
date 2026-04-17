@@ -1,0 +1,29 @@
+[project]
+name = "camsim-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pillow>=11.0",
+    "numpy~=2.1",
+    "python-multipart>=0.0.12",
+    "aiofiles>=24.0",
+    # depth_pro: install from GitHub (see README)
+    #   uv pip install git+https://github.com/apple/ml-depth-pro.git
+    # torch + CUDA 12.4: install separately
+    #   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+]
+
+[tool.uv]
+# PyTorch with CUDA 12.4 — uncomment after setting up the index below
+# If using CPU only: uv pip install torch torchvision
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }

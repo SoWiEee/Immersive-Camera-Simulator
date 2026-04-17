@@ -4,15 +4,15 @@
 
 **目標：能上傳圖片、拿到 depth map、套上基本效果**
 
-- [ ] FastAPI 基本架構 + `/api/depth` endpoint
-- [ ] Depth Pro 模型載入（含 CUDA fallback to CPU）
-- [ ] Depth map 輸出為 16-bit PNG，base64 回傳
-- [ ] Vue 3 專案初始化（VitePlus + TS + Pinia）
-- [ ] 圖片上傳 UI + drag-and-drop
-- [ ] WebGPU device 初始化 + feature detection（fallback 提示）
-- [ ] 圖片 + depth map → GPU texture
-- [ ] 第一個 shader：純 Gaussian blur（驗證管道通暢）
-- [ ] IndexedDB 快取：SHA-256 hash → depth map，避免重整後重算
+- [x] FastAPI 基本架構 + `/api/depth` endpoint
+- [x] Depth Pro 模型載入（含 luminance fallback，無模型時仍可測試 pipeline）
+- [x] Depth map 輸出為 16-bit PNG，base64 回傳
+- [x] Vue 3 專案初始化（VitePlus + TS + Pinia）
+- [x] 圖片上傳 UI + drag-and-drop
+- [x] WebGPU device 初始化 + feature detection（fallback 提示）
+- [x] 圖片 + depth map → GPU texture
+- [x] 第一個 shader：純 Gaussian blur（驗證管道通暢）
+- [x] IndexedDB 快取：SHA-256 hash → depth map，避免重整後重算
 
 **里程碑**：上傳圖片後能看到深度分層模糊效果，第二次上傳相同圖片不需重算
 
