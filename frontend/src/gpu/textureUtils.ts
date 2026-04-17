@@ -34,8 +34,8 @@ export interface DepthUploadResult {
 export async function uploadDepthMapB64(
   device: GPUDevice,
   b64: string,
-  width: number,
-  height: number,
+  _width: number,
+  _height: number,
 ): Promise<DepthUploadResult> {
   // Decode base64 → Blob → ImageBitmap
   const byteChars = atob(b64);
