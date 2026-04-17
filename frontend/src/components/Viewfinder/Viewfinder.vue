@@ -40,7 +40,7 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 let fx: ReturnType<typeof useImageFX> | null = null;
 
 onMounted(async () => {
-  if (compareMode.value || !canvasRef.value) return;
+  if (!canvasRef.value) return;
   await initSinglePipeline();
 });
 
@@ -73,10 +73,10 @@ function onCanvasClick(event: MouseEvent) {
   if (depth !== null) focusDepth.value = depth;
 }
 
-// Re-init single pipeline when switching away from compare mode
+// Reload image into single pipeline when switching to single mode
 watch(compareMode, async (isCompare) => {
-  if (!isCompare) {
-    await initSinglePipeline();
+  if (!isCompare && fx && imageFile.value && depthResult.value) {
+    await fx.loadImageAndDepth(imageFile.value, depthResult.value.depthMapB64);
   }
 });
 
@@ -177,22 +177,25 @@ function onReset() {
       <!-- Compare mode: two pipelines with split line -->
       <CompareView v-if="compareMode && appState === 'ready'" />
 
-      <!-- Single-view mode -->
-      <template v-if="!compareMode || appState === 'loading'">
-        <canvas
-          ref="canvasRef"
-          class="viewfinder__canvas"
-          :class="{ 'viewfinder__canvas--clickable': appState === 'ready' && !compareMode }"
-          @click="onCanvasClick"
-        />
-        <div v-if="appState === 'loading'" class="viewfinder__overlay">
-          <span class="viewfinder__spinner" />
-          <p>景深推算中…</p>
-        </div>
-        <div v-if="appState === 'ready' && !compareMode" class="viewfinder__hint">
-          點擊畫面選取對焦點
-        </div>
-      </template>
+      <!-- Single-view canvas: always in DOM (v-show) so pipeline can be initialized -->
+      <canvas
+        ref="canvasRef"
+        v-show="!compareMode && appState === 'ready'"
+        class="viewfinder__canvas"
+        :class="{ 'viewfinder__canvas--clickable': appState === 'ready' && !compareMode }"
+        @click="onCanvasClick"
+      />
+
+      <!-- Loading overlay (shown in both modes) -->
+      <div v-if="appState === 'loading'" class="viewfinder__overlay">
+        <span class="viewfinder__spinner" />
+        <p>景深推算中…</p>
+      </div>
+
+      <!-- Focus click hint -->
+      <div v-if="appState === 'ready' && !compareMode" class="viewfinder__hint">
+        點擊畫面選取對焦點
+      </div>
     </div>
 
     <!-- ---- Controls sidebar ---- -->

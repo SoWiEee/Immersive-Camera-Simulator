@@ -210,18 +210,15 @@ const showRightLabel = computed(() => splitX.value < 0.88);
 <style scoped>
 .compare-root {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  align-self: stretch;
+  position: relative;
   background: #000;
   overflow: hidden;
-  position: relative;
 }
 
 .compare-frame {
-  position: relative;
-  max-width: 100%;
-  max-height: 100%;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   cursor: crosshair;
 }
