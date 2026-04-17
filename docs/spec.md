@@ -228,11 +228,11 @@ interface LensProfile {
 
 ```mermaid
 flowchart TD
-  A[使用者點擊 Viewfinder 畫面] --> B[取得點擊座標 xy]
-  B --> C[從 depth texture 讀取該像素深度值\ngpu/textureUtils.ts: sampleDepth(x, y)]
-  C --> D[更新 cameraStore.focusDepth]
-  D --> E[bokeh.wgsl uniform 更新 focus_depth]
-  E --> F[左右兩側 pipeline 同步重算模糊半徑]
+  A["使用者點擊 Viewfinder 畫面"] --> B["取得點擊座標 xy"]
+  B --> C["從 depth texture 讀取該像素深度值\n gpu/textureUtils.ts sampleDepth(x, y)"]
+  C --> D["更新 cameraStore.focusDepth"]
+  D --> E["bokeh.wgsl uniform 更新 focus_depth"]
+  E --> F["左右兩側 pipeline 同步重算模糊半徑"]
 ```
 
 ### 4.5 Compare Mode Sequence
