@@ -8,6 +8,7 @@ import DialWheel, { type DialStop } from "@/components/DialWheel/DialWheel.vue";
 import LensSelector from "@/components/LensSelector/LensSelector.vue";
 import ApertureRing from "@/components/ApertureRing/ApertureRing.vue";
 import CompareView from "@/components/CompareView/CompareView.vue";
+import TeachingHUD from "@/components/TeachingHUD/TeachingHUD.vue";
 
 const store = useCameraStore();
 const {
@@ -33,6 +34,7 @@ const {
   lens,
   sensor,
   compareMode,
+  teachingMode,
 } = storeToRefs(store);
 
 // ---- Single-view pipeline (used when compareMode = false) ----
@@ -193,9 +195,17 @@ function onReset() {
       </div>
 
       <!-- Focus click hint -->
-      <div v-if="appState === 'ready' && !compareMode" class="viewfinder__hint">
+      <div v-if="appState === 'ready' && !compareMode && !teachingMode" class="viewfinder__hint">
         點擊畫面選取對焦點
       </div>
+
+      <!-- Teaching mode: dim overlay + HUD panel -->
+      <Transition name="teaching">
+        <div v-if="teachingMode && appState === 'ready'" class="teaching-overlay" />
+      </Transition>
+      <Transition name="teaching-panel">
+        <TeachingHUD v-if="teachingMode && appState === 'ready'" />
+      </Transition>
     </div>
 
     <!-- ---- Controls sidebar ---- -->
@@ -559,6 +569,34 @@ function onReset() {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
   pointer-events: none;
+}
+
+/* Teaching mode overlay */
+.teaching-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 19;
+  pointer-events: none;
+}
+.teaching-enter-active,
+.teaching-leave-active {
+  transition: opacity 0.25s ease;
+}
+.teaching-enter-from,
+.teaching-leave-to {
+  opacity: 0;
+}
+.teaching-panel-enter-active,
+.teaching-panel-leave-active {
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+.teaching-panel-enter-from,
+.teaching-panel-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
 }
 
 /* Controls sidebar */

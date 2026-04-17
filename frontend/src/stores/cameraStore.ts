@@ -50,6 +50,9 @@ export const useCameraStore = defineStore("camera", () => {
   // Compare mode: show phone-baseline vs user-settings split view
   const compareMode = ref<boolean>(true);
 
+  // Teaching mode: dim canvas and show physics explanation panel
+  const teachingMode = ref<boolean>(false);
+
   // ---- Sensor ----
   const selectedSensorId = ref<string>(DEFAULTS.selectedSensorId);
   const sensor = computed(() => SENSORS.find((s) => s.id === selectedSensorId.value) ?? SENSORS[1]);
@@ -204,6 +207,7 @@ export const useCameraStore = defineStore("camera", () => {
     setDepthResult,
     setAppState,
     compareMode,
+    teachingMode,
     setWebGPUSupported,
     autoComputeExposure,
     resetCameraParams,
