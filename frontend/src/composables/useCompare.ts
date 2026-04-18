@@ -20,7 +20,7 @@ function phoneParams(focusDepth: number): CameraRenderParams {
     saturation: 1.15,
     colorTemp: 0.05,
     iso: 200,
-    noiseCoeff: 0.020, // phone sensor after computational NR (1/1.3" equivalent)
+    noiseCoeff: 0.02, // phone sensor after computational NR (1/1.3" equivalent)
     aperture: 1.8,
     focusDepth,
     bokehScale: 0.11, // 5mm f/1.8 → ~0 px bokeh = near-infinite DoF
