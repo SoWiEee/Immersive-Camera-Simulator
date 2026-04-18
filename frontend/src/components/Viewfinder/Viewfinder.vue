@@ -126,7 +126,6 @@ function formatShutter(s: number): string {
   return `1/${Math.round(1 / s)}`;
 }
 
-// ---- Advanced panel toggle ----
 const showAdvanced = ref(false);
 
 function onNewPhoto() {
@@ -166,18 +165,20 @@ function onReset() {
         <TeachingHUD v-if="teachingMode && appState === 'ready'" />
       </Transition>
 
-      <!-- ── Horizontal bottom panel ── -->
+      <!-- ════════════════════════════════════════
+           Floating control panel — centred bottom
+           ════════════════════════════════════════ -->
       <aside
         v-if="appState === 'ready'"
-        class="controls"
+        class="cam-panel"
         :style="{ '--panel-alpha': panelOpacity }"
       >
-        <!-- Advanced row (expands above main row when toggled) -->
+        <!-- Advanced row: slides in above main body -->
         <Transition name="adv-row">
-          <div v-show="showAdvanced" class="controls__adv-row">
-            <div class="ctrl-section">
-              <span class="ctrl-sec-label"
-                >對比 <span class="ctrl-val">{{ contrast.toFixed(2) }}</span></span
+          <div v-show="showAdvanced" class="cam-row cam-row--adv">
+            <div class="adv-cell">
+              <span class="cell-label"
+                >對比 <em class="cell-val">{{ contrast.toFixed(2) }}</em></span
               >
               <input
                 type="range"
@@ -188,10 +189,10 @@ function onReset() {
                 v-model.number="contrast"
               />
             </div>
-            <div class="ctrl-divider" />
-            <div class="ctrl-section">
-              <span class="ctrl-sec-label"
-                >飽和度 <span class="ctrl-val">{{ saturation.toFixed(2) }}</span></span
+            <div class="cell-sep" />
+            <div class="adv-cell">
+              <span class="cell-label"
+                >飽和度 <em class="cell-val">{{ saturation.toFixed(2) }}</em></span
               >
               <input
                 type="range"
@@ -202,14 +203,14 @@ function onReset() {
                 v-model.number="saturation"
               />
             </div>
-            <div class="ctrl-divider" />
-            <div class="ctrl-section">
-              <span class="ctrl-sec-label">
-                色溫
-                <span class="ctrl-val"
-                  >{{ colorTemp >= 0 ? "暖" : "冷" }}{{ Math.abs(colorTemp).toFixed(2) }}</span
-                >
-              </span>
+            <div class="cell-sep" />
+            <div class="adv-cell">
+              <span class="cell-label"
+                >色溫
+                <em class="cell-val"
+                  >{{ colorTemp >= 0 ? "暖" : "冷" }}{{ Math.abs(colorTemp).toFixed(2) }}</em
+                ></span
+              >
               <input
                 type="range"
                 class="ctrl-slider"
@@ -219,10 +220,10 @@ function onReset() {
                 v-model.number="colorTemp"
               />
             </div>
-            <div class="ctrl-divider" />
-            <div class="ctrl-section">
-              <span class="ctrl-sec-label"
-                >暗角 <span class="ctrl-val">{{ vignetteStrength.toFixed(2) }}</span></span
+            <div class="cell-sep" />
+            <div class="adv-cell">
+              <span class="cell-label"
+                >暗角 <em class="cell-val">{{ vignetteStrength.toFixed(2) }}</em></span
               >
               <input
                 type="range"
@@ -233,10 +234,10 @@ function onReset() {
                 v-model.number="vignetteStrength"
               />
             </div>
-            <div class="ctrl-divider" />
-            <div class="ctrl-section">
-              <span class="ctrl-sec-label"
-                >動態模糊 <span class="ctrl-val">{{ motionStrength.toFixed(2) }}</span></span
+            <div class="cell-sep" />
+            <div class="adv-cell">
+              <span class="cell-label"
+                >動態模糊 <em class="cell-val">{{ motionStrength.toFixed(2) }}</em></span
               >
               <input
                 type="range"
@@ -248,12 +249,12 @@ function onReset() {
               />
             </div>
             <template v-if="motionStrength > 0">
-              <div class="ctrl-divider" />
-              <div class="ctrl-section">
-                <span class="ctrl-sec-label">
-                  模糊方向
-                  <span class="ctrl-val">{{ ((motionAngle * 180) / Math.PI).toFixed(0) }}°</span>
-                </span>
+              <div class="cell-sep" />
+              <div class="adv-cell">
+                <span class="cell-label"
+                  >模糊方向
+                  <em class="cell-val">{{ ((motionAngle * 180) / Math.PI).toFixed(0) }}°</em></span
+                >
                 <input
                   type="range"
                   class="ctrl-slider"
@@ -267,11 +268,10 @@ function onReset() {
           </div>
         </Transition>
 
-        <!-- Main row -->
-        <div class="controls__main-row">
-          <!-- EV meter -->
-          <div class="ctrl-section ctrl-section--ev">
-            <span class="ctrl-sec-label">曝光 EV</span>
+        <!-- ── ROW 1: EV status + Shooting mode ── -->
+        <div class="cam-row cam-row--header">
+          <!-- EV status (left) -->
+          <div class="header-ev">
             <div class="ev-bar-track">
               <div
                 class="ev-bar-fill"
@@ -279,25 +279,28 @@ function onReset() {
               />
               <div class="ev-bar-center" />
             </div>
-            <span class="ev-value" :style="{ color: evBarColor }">
-              {{ exposureDelta >= 0 ? "+" : "" }}{{ exposureDelta.toFixed(1) }}
-            </span>
-            <span class="ctrl-hint">
-              f/{{ aperture.toFixed(1) }} · {{ formatShutter(shutterSpeed) }} · ISO {{ iso }}
-            </span>
+            <div class="ev-readout">
+              <span class="ev-value" :style="{ color: evBarColor }">
+                {{ exposureDelta >= 0 ? "+" : "" }}{{ exposureDelta.toFixed(1) }} EV
+              </span>
+              <span class="ev-triangle">
+                f/{{ aperture.toFixed(1) }} &nbsp;·&nbsp;
+                {{ formatShutter(shutterSpeed) }} &nbsp;·&nbsp; ISO {{ iso }}
+              </span>
+            </div>
           </div>
 
-          <div class="ctrl-divider" />
+          <div class="cell-sep cell-sep--v" />
 
-          <!-- 拍攝模式 -->
-          <div class="ctrl-section ctrl-section--mode">
-            <span class="ctrl-sec-label">拍攝模式</span>
-            <div class="mode-grid">
+          <!-- Shooting mode (right) -->
+          <div class="header-mode">
+            <span class="cell-label">拍攝模式</span>
+            <div class="mode-group">
               <button
                 v-for="m in ['M', 'A', 'S', 'P']"
                 :key="m"
                 class="mode-btn"
-                :class="{ 'mode-btn--active': shootingMode === m }"
+                :class="{ active: shootingMode === m }"
                 @click="
                   shootingMode = m as any;
                   store.autoComputeExposure();
@@ -307,37 +310,38 @@ function onReset() {
               </button>
             </div>
           </div>
+        </div>
 
-          <div class="ctrl-divider" />
+        <div class="row-sep" />
 
-          <!-- 感光元件 -->
-          <div class="ctrl-section ctrl-section--sensor">
-            <span class="ctrl-sec-label">感光元件</span>
-            <select class="ctrl-select" v-model="selectedSensorId">
-              <option v-for="s in SENSORS" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
+        <!-- ── ROW 2: Equipment · Aperture · Shutter · ISO ── -->
+        <div class="cam-row cam-row--main">
+          <!-- Equipment: sensor + lens -->
+          <div class="main-cell main-cell--equip">
+            <div class="equip-field">
+              <span class="cell-label">感光元件</span>
+              <select class="ctrl-select" v-model="selectedSensorId">
+                <option v-for="s in SENSORS" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+            </div>
+            <div class="equip-field">
+              <span class="cell-label">鏡頭</span>
+              <select class="ctrl-select" v-model="selectedLensId">
+                <option v-for="l in LENSES" :key="l.id" :value="l.id">{{ l.name }}</option>
+              </select>
+              <span class="cell-dim">{{ lens.brand }}</span>
+            </div>
           </div>
 
-          <div class="ctrl-divider" />
+          <div class="cell-sep cell-sep--v" />
 
-          <!-- 鏡頭 -->
-          <div class="ctrl-section ctrl-section--lens">
-            <span class="ctrl-sec-label">鏡頭</span>
-            <select class="ctrl-select" v-model="selectedLensId">
-              <option v-for="l in LENSES" :key="l.id" :value="l.id">{{ l.name }}</option>
-            </select>
-            <span class="ctrl-hint">{{ lens.brand }}</span>
-          </div>
-
-          <div class="ctrl-divider" />
-
-          <!-- 光圈 -->
+          <!-- Aperture -->
           <div
-            class="ctrl-section ctrl-section--aperture"
-            :class="{ 'ctrl-section--disabled': shootingMode === 'S' || shootingMode === 'P' }"
+            class="main-cell main-cell--aperture"
+            :class="{ 'main-cell--disabled': shootingMode === 'S' || shootingMode === 'P' }"
           >
-            <span class="ctrl-sec-label"
-              >光圈 <span class="ctrl-val">f/{{ aperture.toFixed(1) }}</span></span
+            <span class="cell-label"
+              >光圈 <em class="cell-val">f/{{ aperture.toFixed(1) }}</em></span
             >
             <ApertureRing
               v-model="aperture"
@@ -353,15 +357,15 @@ function onReset() {
             />
           </div>
 
-          <div class="ctrl-divider" />
+          <div class="cell-sep cell-sep--v" />
 
-          <!-- 快門 -->
+          <!-- Shutter -->
           <div
-            class="ctrl-section ctrl-section--shutter"
-            :class="{ 'ctrl-section--disabled': shootingMode === 'A' || shootingMode === 'P' }"
+            class="main-cell main-cell--shutter"
+            :class="{ 'main-cell--disabled': shootingMode === 'A' || shootingMode === 'P' }"
           >
-            <span class="ctrl-sec-label"
-              >快門 <span class="ctrl-val">{{ formatShutter(shutterSpeed) }}</span></span
+            <span class="cell-label"
+              >快門 <em class="cell-val">{{ formatShutter(shutterSpeed) }}</em></span
             >
             <DialWheel
               :stops="SHUTTER_STOPS"
@@ -377,12 +381,12 @@ function onReset() {
             />
           </div>
 
-          <div class="ctrl-divider" />
+          <div class="cell-sep cell-sep--v" />
 
           <!-- ISO -->
-          <div class="ctrl-section ctrl-section--iso">
-            <span class="ctrl-sec-label"
-              >ISO <span class="ctrl-val">{{ iso }}</span></span
+          <div class="main-cell main-cell--iso">
+            <span class="cell-label"
+              >ISO <em class="cell-val">{{ iso }}</em></span
             >
             <DialWheel
               :stops="ISO_STOPS"
@@ -396,15 +400,19 @@ function onReset() {
               "
             />
           </div>
+        </div>
 
-          <div class="ctrl-divider" />
+        <div class="row-sep" />
 
-          <!-- 焦段 -->
-          <div class="ctrl-section ctrl-section--focal">
-            <span class="ctrl-sec-label">
+        <!-- ── ROW 3: Focal length · Focus depth ── -->
+        <div class="cam-row cam-row--comp">
+          <!-- Focal length -->
+          <div class="comp-cell comp-cell--focal">
+            <span class="cell-label">
               焦段
-              <span class="ctrl-val"
-                >{{ focalLength }}mm ≡{{ equivalentFocalLength.toFixed(0) }}mm</span
+              <em class="cell-val"
+                >{{ focalLength }}mm
+                <span class="cell-dim">≡ {{ equivalentFocalLength.toFixed(0) }}mm</span></em
               >
             </span>
             <div class="preset-row">
@@ -412,7 +420,7 @@ function onReset() {
                 v-for="fl in FL_PRESETS"
                 :key="fl"
                 class="preset-btn"
-                :class="{ 'preset-btn--active': focalLength === fl }"
+                :class="{ active: focalLength === fl }"
                 @click="focalLength = fl"
               >
                 {{ fl }}
@@ -428,12 +436,12 @@ function onReset() {
             />
           </div>
 
-          <div class="ctrl-divider" />
+          <div class="cell-sep cell-sep--v" />
 
-          <!-- 對焦距離 -->
-          <div class="ctrl-section ctrl-section--focus">
-            <span class="ctrl-sec-label"
-              >對焦 <span class="ctrl-val">{{ (focusDepth * 100).toFixed(0) }}%</span></span
+          <!-- Focus depth -->
+          <div class="comp-cell comp-cell--focus">
+            <span class="cell-label"
+              >對焦距離 <em class="cell-val">{{ (focusDepth * 100).toFixed(0) }}%</em></span
             >
             <input
               type="range"
@@ -443,26 +451,20 @@ function onReset() {
               step="0.01"
               v-model.number="focusDepth"
             />
-            <span class="ctrl-hint">或點擊畫面</span>
+            <span class="cell-dim">或點擊畫面選取對焦點</span>
           </div>
+        </div>
 
-          <div class="ctrl-divider" />
+        <div class="row-sep" />
 
-          <!-- 進階設定 toggle -->
-          <div class="ctrl-section ctrl-section--adv">
-            <span class="ctrl-sec-label">進階設定</span>
-            <button class="adv-toggle-btn" @click="showAdvanced = !showAdvanced">
-              {{ showAdvanced ? "▼ 收起" : "▲ 展開" }}
-            </button>
-          </div>
-
-          <div class="ctrl-divider" />
-
-          <!-- 動作 -->
-          <div class="ctrl-section ctrl-section--actions">
-            <button class="ctrl-btn ctrl-btn--reset" @click="onReset">重設參數</button>
-            <button class="ctrl-btn" @click="onNewPhoto">換照片</button>
-          </div>
+        <!-- ── ROW 4: Footer ── -->
+        <div class="cam-row cam-row--footer">
+          <button class="adv-toggle" @click="showAdvanced = !showAdvanced">
+            {{ showAdvanced ? "▼ 收起進階" : "▲ 進階設定" }}
+          </button>
+          <span class="footer-spacer" />
+          <button class="action-btn action-btn--reset" @click="onReset">重設參數</button>
+          <button class="action-btn" @click="onNewPhoto">換照片</button>
         </div>
       </aside>
     </div>
@@ -470,12 +472,12 @@ function onReset() {
 </template>
 
 <style scoped>
+/* ── Canvas / viewfinder shell ── */
 .viewfinder {
   flex: 1;
   overflow: hidden;
   position: relative;
 }
-
 .viewfinder__canvas-wrap {
   position: absolute;
   inset: 0;
@@ -485,7 +487,6 @@ function onReset() {
   background: #000;
   overflow: hidden;
 }
-
 .viewfinder__canvas {
   max-width: 100%;
   max-height: 100%;
@@ -494,7 +495,6 @@ function onReset() {
 .viewfinder__canvas--clickable {
   cursor: crosshair;
 }
-
 .viewfinder__overlay {
   position: absolute;
   inset: 0;
@@ -507,7 +507,6 @@ function onReset() {
   color: var(--text-dim);
   font-size: 14px;
 }
-
 .viewfinder__spinner {
   width: 32px;
   height: 32px;
@@ -521,18 +520,17 @@ function onReset() {
     transform: rotate(360deg);
   }
 }
-
 .viewfinder__hint {
   position: absolute;
   bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.35);
   pointer-events: none;
 }
 
-/* Teaching mode */
+/* ── Teaching mode ── */
 .teaching-overlay {
   position: absolute;
   inset: 0;
@@ -560,45 +558,106 @@ function onReset() {
   transform: translateX(20px);
 }
 
-/* ── Horizontal bottom panel ── */
-.controls {
+/* ══════════════════════════════════════════════════
+   CAMERA PANEL
+   ══════════════════════════════════════════════════ */
+.cam-panel {
   position: absolute;
-  bottom: 12px;
-  left: 12px;
-  right: 12px;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1020px, calc(100% - 32px));
   z-index: 10;
 
   background: rgba(10, 10, 14, var(--panel-alpha, 0.88));
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
+  border-radius: 16px;
   box-shadow:
-    0 8px 40px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    0 12px 48px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-size: 12px;
 }
 
-/* Advanced row */
-.controls__adv-row {
+/* Row separator */
+.row-sep {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+}
+
+/* Vertical cell separator */
+.cell-sep--v {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+  align-self: stretch;
+  margin: 10px 0;
+}
+
+/* Shared label style */
+.cell-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  white-space: nowrap;
+}
+.cell-val {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cell-dim {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.28);
+}
+
+/* ── Row: Advanced ── */
+.cam-row--adv {
   display: flex;
   flex-direction: row;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 10px 0;
+  background: rgba(255, 255, 255, 0.02);
   overflow-x: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
 }
-
+.adv-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 16px;
+  min-width: 140px;
+  flex: 1;
+}
+.cell-sep {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  align-self: stretch;
+  flex-shrink: 0;
+}
 .adv-row-enter-active,
 .adv-row-leave-active {
   transition:
     max-height 0.22s ease,
-    opacity 0.22s ease;
-  max-height: 100px;
+    opacity 0.2s ease;
+  max-height: 80px;
   overflow: hidden;
 }
 .adv-row-enter-from,
@@ -607,69 +666,19 @@ function onReset() {
   opacity: 0;
 }
 
-/* Main row */
-.controls__main-row {
+/* ── Row 1: Header ── */
+.cam-row--header {
   display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  align-items: center;
+  padding: 10px 20px;
+  gap: 0;
 }
-
-/* Sections */
-.ctrl-section {
+.header-ev {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 6px;
-  padding: 10px 14px;
-  flex-shrink: 0;
-}
-.ctrl-section--disabled {
-  opacity: 0.38;
-  pointer-events: none;
-}
-
-/* Section label row */
-.ctrl-sec-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 6px;
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.38);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
-}
-.ctrl-val {
-  font-size: 11px;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-  font-family: monospace;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.ctrl-hint {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.28);
-  white-space: nowrap;
-}
-
-/* Section divider */
-.ctrl-divider {
-  width: 1px;
-  background: rgba(255, 255, 255, 0.07);
-  flex-shrink: 0;
-  align-self: stretch;
-  margin: 8px 0;
-}
-
-/* EV section */
-.ctrl-section--ev {
-  min-width: 100px;
+  flex: 1;
+  min-width: 0;
 }
 .ev-bar-track {
   position: relative;
@@ -691,160 +700,201 @@ function onReset() {
   bottom: 0;
   left: 50%;
   width: 2px;
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.25);
   transform: translateX(-50%);
 }
+.ev-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
 .ev-value {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
   font-family: monospace;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-
-/* Mode section */
-.ctrl-section--mode {
-  min-width: 110px;
+.ev-triangle {
+  font-size: 12px;
+  font-family: monospace;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.45);
 }
-.mode-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 3px;
+.header-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-left: 20px;
+}
+.mode-group {
+  display: flex;
+  gap: 4px;
 }
 .mode-btn {
-  padding: 4px 6px;
+  width: 36px;
+  height: 30px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 5px;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 11px;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   transition:
     border-color 0.12s,
     color 0.12s,
     background 0.12s;
-  white-space: nowrap;
-  text-align: center;
 }
-.mode-btn--active {
+.mode-btn.active {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(255, 153, 51, 0.12);
+  background: rgba(255, 153, 51, 0.14);
 }
-.mode-btn:hover:not(.mode-btn--active) {
-  background: rgba(255, 255, 255, 0.08);
+.mode-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.09);
   color: rgba(255, 255, 255, 0.75);
 }
 
-/* Sensor / Lens */
-.ctrl-section--sensor {
-  min-width: 140px;
+/* ── Row 2: Main (Equipment + Exposure triangle) ── */
+.cam-row--main {
+  display: flex;
+  align-items: center;
+  padding: 0;
 }
-.ctrl-section--lens {
-  min-width: 170px;
+.main-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px;
+}
+.main-cell--disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Equipment column */
+.main-cell--equip {
+  min-width: 190px;
+  flex: 0 0 190px;
+  gap: 10px;
+}
+.equip-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .ctrl-select {
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
-  padding: 4px 7px;
+  padding: 5px 8px;
   font-size: 11px;
   width: 100%;
+  cursor: pointer;
 }
 
-/* Aperture */
-.ctrl-section--aperture {
-  min-width: 150px;
+/* Aperture column */
+.main-cell--aperture {
   align-items: center;
+  flex: 0 0 155px;
 }
 
-/* Shutter / ISO */
-.ctrl-section--shutter {
-  min-width: 130px;
+/* Shutter / ISO columns */
+.main-cell--shutter {
+  flex: 1;
+  min-width: 150px;
 }
-.ctrl-section--iso {
-  min-width: 110px;
+.main-cell--iso {
+  flex: 0 0 140px;
 }
 
-/* Focal length */
-.ctrl-section--focal {
-  min-width: 155px;
+/* ── Row 3: Composition ── */
+.cam-row--comp {
+  display: flex;
+  align-items: center;
+  padding: 0;
 }
+.comp-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px;
+}
+.comp-cell--focal {
+  flex: 1;
+  min-width: 0;
+}
+.comp-cell--focus {
+  flex: 0 0 220px;
+}
+
 .preset-row {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   flex-wrap: nowrap;
 }
 .preset-btn {
-  padding: 2px 5px;
+  padding: 3px 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 3px;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 9px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
     border-color 0.1s,
     color 0.1s,
     background 0.1s;
-  white-space: nowrap;
 }
 .preset-btn:hover {
   border-color: rgba(255, 153, 51, 0.4);
   color: rgba(255, 255, 255, 0.75);
 }
-.preset-btn--active {
+.preset-btn.active {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(255, 153, 51, 0.1);
+  background: rgba(255, 153, 51, 0.12);
 }
-
 .ctrl-slider {
   width: 100%;
   accent-color: var(--accent);
   cursor: pointer;
 }
 
-/* Focus */
-.ctrl-section--focus {
-  min-width: 120px;
-}
-
-/* Advanced toggle */
-.ctrl-section--adv {
-  min-width: 80px;
+/* ── Row 4: Footer ── */
+.cam-row--footer {
+  display: flex;
   align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.15);
 }
-.adv-toggle-btn {
-  padding: 5px 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+.footer-spacer {
+  flex: 1;
+}
+.adv-toggle {
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.45);
   font-size: 11px;
   cursor: pointer;
-  white-space: nowrap;
   transition:
     background 0.12s,
     color 0.12s;
+  white-space: nowrap;
 }
-.adv-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
+.adv-toggle:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.8);
 }
-
-/* Action buttons */
-.ctrl-section--actions {
-  min-width: 130px;
-  margin-left: auto;
-  gap: 5px;
-}
-.ctrl-btn {
-  width: 100%;
-  padding: 6px 10px;
+.action-btn {
+  padding: 5px 14px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 7px;
@@ -857,12 +907,12 @@ function onReset() {
     color 0.12s,
     background 0.12s;
 }
-.ctrl-btn:hover {
+.action-btn:hover {
   border-color: rgba(255, 153, 51, 0.4);
   color: rgba(255, 255, 255, 0.85);
   background: rgba(255, 255, 255, 0.07);
 }
-.ctrl-btn--reset:hover {
+.action-btn--reset:hover {
   border-color: rgba(255, 107, 107, 0.5);
   color: #ff8080;
   background: rgba(255, 107, 107, 0.07);
