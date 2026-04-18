@@ -44,6 +44,23 @@ onMounted(() => {
           </button>
         </div>
 
+        <div v-if="store.appState === 'ready'" class="app-header__tabs">
+          <button
+            class="header-tab"
+            :class="{ 'header-tab--active': store.compareMode }"
+            @click="store.compareMode = true"
+          >
+            ⊟ 對比
+          </button>
+          <button
+            class="header-tab"
+            :class="{ 'header-tab--active': !store.compareMode }"
+            @click="store.compareMode = false"
+          >
+            ◻ 單畫面
+          </button>
+        </div>
+
         <span class="app-header__spacer" />
 
         <!-- Depth result info chips -->
