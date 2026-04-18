@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useCameraStore } from "@/stores/cameraStore";
 import { useImageFX } from "@/composables/useImageFX";
 import { SENSORS } from "@/data/sensors";
 import { LENSES } from "@/data/lenses";
-import DialWheel, { type DialStop } from "@/components/DialWheel/DialWheel.vue";
 import ApertureRing from "@/components/ApertureRing/ApertureRing.vue";
 import CompareView from "@/components/CompareView/CompareView.vue";
 import TeachingHUD from "@/components/TeachingHUD/TeachingHUD.vue";
@@ -80,8 +79,10 @@ watch(compareMode, async (isCompare) => {
   }
 });
 
-// ---- Dial stops ----
-const SHUTTER_STOPS: DialStop[] = [
+// ---- Stop grids (two rows each) ----
+type Stop = { value: number; label: string };
+
+const SHUTTER_ROW1: Stop[] = [
   { value: 1 / 4000, label: "1/4000" },
   { value: 1 / 2000, label: "1/2000" },
   { value: 1 / 1000, label: "1/1000" },
@@ -91,6 +92,8 @@ const SHUTTER_STOPS: DialStop[] = [
   { value: 1 / 60, label: "1/60" },
   { value: 1 / 30, label: "1/30" },
   { value: 1 / 15, label: "1/15" },
+];
+const SHUTTER_ROW2: Stop[] = [
   { value: 1 / 8, label: "1/8" },
   { value: 1 / 4, label: "1/4" },
   { value: 1 / 2, label: '1/2"' },
@@ -101,13 +104,15 @@ const SHUTTER_STOPS: DialStop[] = [
   { value: 15, label: '15"' },
   { value: 30, label: '30"' },
 ];
-
-const ISO_STOPS: DialStop[] = [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600].map((v) => ({
-  value: v,
-  label: String(v),
-}));
+const ISO_ROW1: Stop[] = [100, 200, 400, 800, 1600].map((v) => ({ value: v, label: String(v) }));
+const ISO_ROW2: Stop[] = [3200, 6400, 12800, 25600].map((v) => ({ value: v, label: String(v) }));
 
 const FL_PRESETS = [24, 35, 50, 85, 135, 200];
+
+// Fuzzy match for shutter (floating-point values set by autoCompute may differ slightly)
+function isShutterActive(v: number): boolean {
+  return Math.abs(shutterSpeed.value - v) / Math.max(shutterSpeed.value, v) < 0.05;
+}
 
 // ---- EV display ----
 const evBarWidth = computed(() => {
@@ -127,6 +132,40 @@ function formatShutter(s: number): string {
 }
 
 const showAdvanced = ref(false);
+
+// ---- Panel drag ----
+const dragOffsetX = ref(0);
+const dragOffsetY = ref(0);
+let dragActive = false;
+let dragStartClientX = 0;
+let dragStartClientY = 0;
+let dragStartOffsetX = 0;
+let dragStartOffsetY = 0;
+
+function onPanelDragStart(e: MouseEvent) {
+  dragActive = true;
+  dragStartClientX = e.clientX;
+  dragStartClientY = e.clientY;
+  dragStartOffsetX = dragOffsetX.value;
+  dragStartOffsetY = dragOffsetY.value;
+  window.addEventListener("mousemove", onPanelDragMove);
+  window.addEventListener("mouseup", onPanelDragEnd);
+}
+function onPanelDragMove(e: MouseEvent) {
+  if (!dragActive) return;
+  dragOffsetX.value = dragStartOffsetX + (e.clientX - dragStartClientX);
+  // Y is bottom-relative: dragging up increases the bottom offset
+  dragOffsetY.value = dragStartOffsetY - (e.clientY - dragStartClientY);
+}
+function onPanelDragEnd() {
+  dragActive = false;
+  window.removeEventListener("mousemove", onPanelDragMove);
+  window.removeEventListener("mouseup", onPanelDragEnd);
+}
+onUnmounted(() => {
+  window.removeEventListener("mousemove", onPanelDragMove);
+  window.removeEventListener("mouseup", onPanelDragEnd);
+});
 
 function onNewPhoto() {
   store.setAppState("idle");
@@ -171,7 +210,11 @@ function onReset() {
       <aside
         v-if="appState === 'ready'"
         class="cam-panel"
-        :style="{ '--panel-alpha': panelOpacity }"
+        :style="{
+          '--panel-alpha': panelOpacity,
+          bottom: `${16 + dragOffsetY}px`,
+          transform: `translateX(calc(-50% + ${dragOffsetX}px))`,
+        }"
       >
         <!-- Advanced row: slides in above main body -->
         <Transition name="adv-row">
@@ -268,8 +311,8 @@ function onReset() {
           </div>
         </Transition>
 
-        <!-- ── ROW 1: EV status + Shooting mode ── -->
-        <div class="cam-row cam-row--header">
+        <!-- ── ROW 1: EV status + Shooting mode (drag handle) ── -->
+        <div class="cam-row cam-row--header" @mousedown.prevent="onPanelDragStart">
           <!-- EV status (left) -->
           <div class="header-ev">
             <div class="ev-bar-track">
@@ -367,18 +410,36 @@ function onReset() {
             <span class="cell-label"
               >快門 <em class="cell-val">{{ formatShutter(shutterSpeed) }}</em></span
             >
-            <DialWheel
-              :stops="SHUTTER_STOPS"
-              v-model="shutterSpeed"
-              :disabled="shootingMode === 'A' || shootingMode === 'P'"
-              :log-scale="true"
-              @update:model-value="
-                (v) => {
-                  shutterSpeed = v;
-                  store.autoComputeExposure();
-                }
-              "
-            />
+            <div class="stop-grid">
+              <div class="stop-row">
+                <button
+                  v-for="s in SHUTTER_ROW1"
+                  :key="s.label"
+                  class="stop-btn"
+                  :class="{ active: isShutterActive(s.value) }"
+                  @click="
+                    shutterSpeed = s.value;
+                    store.autoComputeExposure();
+                  "
+                >
+                  {{ s.label }}
+                </button>
+              </div>
+              <div class="stop-row">
+                <button
+                  v-for="s in SHUTTER_ROW2"
+                  :key="s.label"
+                  class="stop-btn"
+                  :class="{ active: isShutterActive(s.value) }"
+                  @click="
+                    shutterSpeed = s.value;
+                    store.autoComputeExposure();
+                  "
+                >
+                  {{ s.label }}
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="cell-sep cell-sep--v" />
@@ -388,17 +449,36 @@ function onReset() {
             <span class="cell-label"
               >ISO <em class="cell-val">{{ iso }}</em></span
             >
-            <DialWheel
-              :stops="ISO_STOPS"
-              v-model="iso"
-              :log-scale="true"
-              @update:model-value="
-                (v) => {
-                  iso = v;
-                  store.autoComputeExposure();
-                }
-              "
-            />
+            <div class="stop-grid">
+              <div class="stop-row">
+                <button
+                  v-for="s in ISO_ROW1"
+                  :key="s.value"
+                  class="stop-btn"
+                  :class="{ active: iso === s.value }"
+                  @click="
+                    iso = s.value;
+                    store.autoComputeExposure();
+                  "
+                >
+                  {{ s.label }}
+                </button>
+              </div>
+              <div class="stop-row">
+                <button
+                  v-for="s in ISO_ROW2"
+                  :key="s.value"
+                  class="stop-btn"
+                  :class="{ active: iso === s.value }"
+                  @click="
+                    iso = s.value;
+                    store.autoComputeExposure();
+                  "
+                >
+                  {{ s.label }}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -666,12 +746,17 @@ function onReset() {
   opacity: 0;
 }
 
-/* ── Row 1: Header ── */
+/* ── Row 1: Header (drag handle) ── */
 .cam-row--header {
   display: flex;
   align-items: center;
   padding: 10px 20px;
   gap: 0;
+  cursor: grab;
+  user-select: none;
+}
+.cam-row--header:active {
+  cursor: grabbing;
 }
 .header-ev {
   display: flex;
@@ -786,14 +871,15 @@ function onReset() {
   gap: 4px;
 }
 .ctrl-select {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #1a1a1e;
+  color: #e8e8e8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   padding: 5px 8px;
   font-size: 11px;
   width: 100%;
   cursor: pointer;
+  color-scheme: dark;
 }
 
 /* Aperture column */
@@ -805,10 +891,48 @@ function onReset() {
 /* Shutter / ISO columns */
 .main-cell--shutter {
   flex: 1;
-  min-width: 150px;
+  min-width: 230px;
 }
 .main-cell--iso {
-  flex: 0 0 140px;
+  flex: 0 0 200px;
+}
+
+/* Two-row stop grids */
+.stop-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.stop-row {
+  display: flex;
+  gap: 3px;
+}
+.stop-btn {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: center;
+  transition:
+    border-color 0.1s,
+    color 0.1s,
+    background 0.1s;
+}
+.stop-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.8);
+}
+.stop-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(255, 153, 51, 0.14);
 }
 
 /* ── Row 3: Composition ── */
