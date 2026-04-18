@@ -46,6 +46,30 @@ onMounted(() => {
 
         <span class="app-header__spacer" />
 
+        <!-- Depth result info chips -->
+        <div v-if="store.appState === 'ready' && store.depthResult" class="app-header__depth-info">
+          <span class="depth-chip" title="景深推論耗時">{{ store.depthResult.inferenceMs }}ms</span>
+          <span class="depth-chip" title="圖片尺寸"
+            >{{ store.depthResult.width }}×{{ store.depthResult.height }}</span
+          >
+          <span class="depth-chip" title="估算焦距"
+            >{{ store.depthResult.focalLengthPx.toFixed(0) }}px</span
+          >
+        </div>
+
+        <!-- Panel opacity slider -->
+        <div v-if="store.appState === 'ready'" class="app-header__opacity" title="控制面板透明度">
+          <span class="opacity-icon">◧</span>
+          <input
+            type="range"
+            class="opacity-slider"
+            min="0.1"
+            max="1"
+            step="0.05"
+            v-model.number="store.panelOpacity"
+          />
+        </div>
+
         <span v-if="store.appState === 'loading'" class="app-header__status loading">
           推算景深中…
         </span>
@@ -140,6 +164,46 @@ onMounted(() => {
 .app-header__spacer {
   flex: 1;
 }
+
+/* Depth info chips */
+.app-header__depth-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.depth-chip {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-family: monospace;
+  color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+/* Opacity slider */
+.app-header__opacity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.opacity-icon {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1;
+  cursor: default;
+}
+.opacity-slider {
+  width: 72px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 4px;
+}
+
 .app-header__status {
   font-size: 12px;
   flex-shrink: 0;

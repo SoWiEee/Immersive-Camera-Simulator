@@ -53,6 +53,9 @@ export const useCameraStore = defineStore("camera", () => {
   // Teaching mode: dim canvas and show physics explanation panel
   const teachingMode = ref<boolean>(false);
 
+  // Controls panel overlay opacity (0.1 – 1.0)
+  const panelOpacity = ref<number>(0.88);
+
   // ---- Sensor ----
   const selectedSensorId = ref<string>(DEFAULTS.selectedSensorId);
   const sensor = computed(() => SENSORS.find((s) => s.id === selectedSensorId.value) ?? SENSORS[1]);
@@ -208,6 +211,7 @@ export const useCameraStore = defineStore("camera", () => {
     setAppState,
     compareMode,
     teachingMode,
+    panelOpacity,
     setWebGPUSupported,
     autoComputeExposure,
     resetCameraParams,

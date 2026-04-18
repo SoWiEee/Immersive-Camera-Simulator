@@ -35,6 +35,7 @@ const {
   sensor,
   compareMode,
   teachingMode,
+  panelOpacity,
 } = storeToRefs(store);
 
 // ---- Single-view pipeline (used when compareMode = false) ----
@@ -139,7 +140,7 @@ function onReset() {
 
 <template>
   <div class="viewfinder">
-    <!-- ---- Canvas area ---- -->
+    <!-- ---- Canvas area (full width, controls float over it) ---- -->
     <div class="viewfinder__canvas-wrap">
       <!-- Compare mode: two pipelines with split line -->
       <CompareView v-if="compareMode && appState === 'ready'" />
@@ -171,308 +172,299 @@ function onReset() {
       <Transition name="teaching-panel">
         <TeachingHUD v-if="teachingMode && appState === 'ready'" />
       </Transition>
-    </div>
 
-    <!-- ---- Controls sidebar ---- -->
-    <aside class="controls" v-if="appState === 'ready'">
-      <!-- Compare mode toggle -->
-      <div class="ctrl-group ctrl-group--row">
-        <button
-          class="mode-btn"
-          :class="{ 'mode-btn--active': compareMode }"
-          @click="compareMode = true"
-        >
-          ⊟ 對比模式
-        </button>
-        <button
-          class="mode-btn"
-          :class="{ 'mode-btn--active': !compareMode }"
-          @click="compareMode = false"
-        >
-          ◻ 單畫面
-        </button>
-      </div>
-
-      <!-- EV meter -->
-      <div class="ctrl-group">
-        <div class="ctrl-label">
-          曝光 EV
-          <span class="ctrl-value" :style="{ color: evBarColor }">
-            {{ exposureDelta >= 0 ? "+" : "" }}{{ exposureDelta.toFixed(1) }} EV
-          </span>
-        </div>
-        <div class="ev-bar-track">
-          <div class="ev-bar-fill" :style="{ width: evBarWidth + '%', background: evBarColor }" />
-          <div class="ev-bar-center" />
-        </div>
-        <p class="ctrl-hint">
-          f/{{ aperture.toFixed(1) }} · {{ formatShutter(shutterSpeed) }} · ISO {{ iso }}
-        </p>
-      </div>
-
-      <!-- Shooting mode -->
-      <div class="ctrl-group">
-        <div class="ctrl-label">拍攝模式</div>
-        <div class="mode-row">
+      <!-- ---- Floating glass controls panel ---- -->
+      <aside
+        v-if="appState === 'ready'"
+        class="controls"
+        :style="{ '--panel-alpha': panelOpacity }"
+      >
+        <!-- Compare mode toggle -->
+        <div class="ctrl-group ctrl-group--row">
           <button
-            v-for="m in ['M', 'A', 'S', 'P']"
-            :key="m"
             class="mode-btn"
-            :class="{ 'mode-btn--active': shootingMode === m }"
-            @click="
-              shootingMode = m as any;
-              store.autoComputeExposure();
-            "
+            :class="{ 'mode-btn--active': compareMode }"
+            @click="compareMode = true"
           >
-            {{ m }}
+            ⊟ 對比
           </button>
-        </div>
-      </div>
-
-      <!-- Sensor -->
-      <div class="ctrl-group">
-        <div class="ctrl-label">感光元件</div>
-        <select class="ctrl-select" v-model="selectedSensorId">
-          <option v-for="s in SENSORS" :key="s.id" :value="s.id">{{ s.name }}</option>
-        </select>
-      </div>
-
-      <!-- Lens selector -->
-      <details class="ctrl-details">
-        <summary class="ctrl-summary">鏡頭 — {{ lens.name }}</summary>
-        <LensSelector v-model="selectedLensId" />
-      </details>
-
-      <!-- Aperture ring + f-stop presets -->
-      <div
-        class="ctrl-group"
-        :class="{ 'ctrl-group--disabled': shootingMode === 'S' || shootingMode === 'P' }"
-      >
-        <div class="ctrl-label">
-          光圈 <span class="ctrl-value">f/{{ aperture.toFixed(1) }}</span>
-        </div>
-        <ApertureRing
-          v-model="aperture"
-          :min="lens.maxAperture"
-          :max="lens.minAperture"
-          :disabled="shootingMode === 'S' || shootingMode === 'P'"
-          @update:model-value="
-            (v) => {
-              aperture = v;
-              store.autoComputeExposure();
-            }
-          "
-        />
-      </div>
-
-      <!-- Shutter speed dial -->
-      <div
-        class="ctrl-group"
-        :class="{ 'ctrl-group--disabled': shootingMode === 'A' || shootingMode === 'P' }"
-      >
-        <div class="ctrl-label">
-          快門 <span class="ctrl-value">{{ formatShutter(shutterSpeed) }}</span>
-        </div>
-        <DialWheel
-          :stops="SHUTTER_STOPS"
-          v-model="shutterSpeed"
-          :disabled="shootingMode === 'A' || shootingMode === 'P'"
-          :log-scale="true"
-          @update:model-value="
-            (v) => {
-              shutterSpeed = v;
-              store.autoComputeExposure();
-            }
-          "
-        />
-      </div>
-
-      <!-- ISO dial -->
-      <div class="ctrl-group">
-        <div class="ctrl-label">
-          ISO <span class="ctrl-value">{{ iso }}</span>
-        </div>
-        <DialWheel
-          :stops="ISO_STOPS"
-          v-model="iso"
-          :log-scale="true"
-          @update:model-value="
-            (v) => {
-              iso = v;
-              store.autoComputeExposure();
-            }
-          "
-        />
-      </div>
-
-      <!-- Focal length presets -->
-      <div class="ctrl-group">
-        <div class="ctrl-label">
-          焦段
-          <span class="ctrl-value"
-            >{{ focalLength }}mm (≡{{ equivalentFocalLength.toFixed(0) }}mm)</span
-          >
-        </div>
-        <div class="preset-row">
           <button
-            v-for="fl in FL_PRESETS"
-            :key="fl"
-            class="preset-btn"
-            :class="{ 'preset-btn--active': focalLength === fl }"
-            @click="focalLength = fl"
+            class="mode-btn"
+            :class="{ 'mode-btn--active': !compareMode }"
+            @click="compareMode = false"
           >
-            {{ fl }}
+            ◻ 單畫面
           </button>
         </div>
-        <input
-          type="range"
-          class="ctrl-slider"
-          min="14"
-          max="600"
-          step="1"
-          v-model.number="focalLength"
-        />
-      </div>
 
-      <!-- Focus depth -->
-      <div class="ctrl-group">
-        <div class="ctrl-label">
-          對焦距離 <span class="ctrl-value">{{ (focusDepth * 100).toFixed(0) }}%</span>
-        </div>
-        <input
-          type="range"
-          class="ctrl-slider"
-          min="0"
-          max="1"
-          step="0.01"
-          v-model.number="focusDepth"
-        />
-        <p class="ctrl-hint">或點擊畫面選取對焦點</p>
-      </div>
-
-      <!-- Advanced settings -->
-      <details class="ctrl-details">
-        <summary class="ctrl-summary">進階設定</summary>
-
+        <!-- EV meter -->
         <div class="ctrl-group">
           <div class="ctrl-label">
-            對比 <span class="ctrl-value">{{ contrast.toFixed(2) }}</span>
-          </div>
-          <input
-            type="range"
-            class="ctrl-slider"
-            min="0.5"
-            max="2"
-            step="0.05"
-            v-model.number="contrast"
-          />
-        </div>
-        <div class="ctrl-group">
-          <div class="ctrl-label">
-            飽和度 <span class="ctrl-value">{{ saturation.toFixed(2) }}</span>
-          </div>
-          <input
-            type="range"
-            class="ctrl-slider"
-            min="0"
-            max="2"
-            step="0.05"
-            v-model.number="saturation"
-          />
-        </div>
-        <div class="ctrl-group">
-          <div class="ctrl-label">
-            色溫
-            <span class="ctrl-value">
-              {{ colorTemp >= 0 ? "暖" : "冷" }} {{ Math.abs(colorTemp).toFixed(2) }}
+            曝光 EV
+            <span class="ctrl-value" :style="{ color: evBarColor }">
+              {{ exposureDelta >= 0 ? "+" : "" }}{{ exposureDelta.toFixed(1) }} EV
             </span>
           </div>
-          <input
-            type="range"
-            class="ctrl-slider"
-            min="-1"
-            max="1"
-            step="0.05"
-            v-model.number="colorTemp"
+          <div class="ev-bar-track">
+            <div class="ev-bar-fill" :style="{ width: evBarWidth + '%', background: evBarColor }" />
+            <div class="ev-bar-center" />
+          </div>
+          <p class="ctrl-hint">
+            f/{{ aperture.toFixed(1) }} · {{ formatShutter(shutterSpeed) }} · ISO {{ iso }}
+          </p>
+        </div>
+
+        <!-- Shooting mode -->
+        <div class="ctrl-group">
+          <div class="ctrl-label">拍攝模式</div>
+          <div class="mode-row">
+            <button
+              v-for="m in ['M', 'A', 'S', 'P']"
+              :key="m"
+              class="mode-btn"
+              :class="{ 'mode-btn--active': shootingMode === m }"
+              @click="
+                shootingMode = m as any;
+                store.autoComputeExposure();
+              "
+            >
+              {{ m }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Sensor -->
+        <div class="ctrl-group">
+          <div class="ctrl-label">感光元件</div>
+          <select class="ctrl-select" v-model="selectedSensorId">
+            <option v-for="s in SENSORS" :key="s.id" :value="s.id">{{ s.name }}</option>
+          </select>
+        </div>
+
+        <!-- Lens selector -->
+        <details class="ctrl-details">
+          <summary class="ctrl-summary">鏡頭 — {{ lens.name }}</summary>
+          <LensSelector v-model="selectedLensId" />
+        </details>
+
+        <!-- Aperture ring + f-stop presets -->
+        <div
+          class="ctrl-group"
+          :class="{ 'ctrl-group--disabled': shootingMode === 'S' || shootingMode === 'P' }"
+        >
+          <div class="ctrl-label">
+            光圈 <span class="ctrl-value">f/{{ aperture.toFixed(1) }}</span>
+          </div>
+          <ApertureRing
+            v-model="aperture"
+            :min="lens.maxAperture"
+            :max="lens.minAperture"
+            :disabled="shootingMode === 'S' || shootingMode === 'P'"
+            @update:model-value="
+              (v) => {
+                aperture = v;
+                store.autoComputeExposure();
+              }
+            "
           />
         </div>
+
+        <!-- Shutter speed dial -->
+        <div
+          class="ctrl-group"
+          :class="{ 'ctrl-group--disabled': shootingMode === 'A' || shootingMode === 'P' }"
+        >
+          <div class="ctrl-label">
+            快門 <span class="ctrl-value">{{ formatShutter(shutterSpeed) }}</span>
+          </div>
+          <DialWheel
+            :stops="SHUTTER_STOPS"
+            v-model="shutterSpeed"
+            :disabled="shootingMode === 'A' || shootingMode === 'P'"
+            :log-scale="true"
+            @update:model-value="
+              (v) => {
+                shutterSpeed = v;
+                store.autoComputeExposure();
+              }
+            "
+          />
+        </div>
+
+        <!-- ISO dial -->
         <div class="ctrl-group">
           <div class="ctrl-label">
-            暗角 <span class="ctrl-value">{{ vignetteStrength.toFixed(2) }}</span>
+            ISO <span class="ctrl-value">{{ iso }}</span>
           </div>
-          <input
-            type="range"
-            class="ctrl-slider"
-            min="0"
-            max="1"
-            step="0.05"
-            v-model.number="vignetteStrength"
+          <DialWheel
+            :stops="ISO_STOPS"
+            v-model="iso"
+            :log-scale="true"
+            @update:model-value="
+              (v) => {
+                iso = v;
+                store.autoComputeExposure();
+              }
+            "
           />
         </div>
+
+        <!-- Focal length presets -->
         <div class="ctrl-group">
           <div class="ctrl-label">
-            動態模糊 <span class="ctrl-value">{{ motionStrength.toFixed(2) }}</span>
+            焦段
+            <span class="ctrl-value"
+              >{{ focalLength }}mm (≡{{ equivalentFocalLength.toFixed(0) }}mm)</span
+            >
+          </div>
+          <div class="preset-row">
+            <button
+              v-for="fl in FL_PRESETS"
+              :key="fl"
+              class="preset-btn"
+              :class="{ 'preset-btn--active': focalLength === fl }"
+              @click="focalLength = fl"
+            >
+              {{ fl }}
+            </button>
+          </div>
+          <input
+            type="range"
+            class="ctrl-slider"
+            min="14"
+            max="600"
+            step="1"
+            v-model.number="focalLength"
+          />
+        </div>
+
+        <!-- Focus depth -->
+        <div class="ctrl-group">
+          <div class="ctrl-label">
+            對焦距離 <span class="ctrl-value">{{ (focusDepth * 100).toFixed(0) }}%</span>
           </div>
           <input
             type="range"
             class="ctrl-slider"
             min="0"
             max="1"
-            step="0.05"
-            v-model.number="motionStrength"
+            step="0.01"
+            v-model.number="focusDepth"
           />
+          <p class="ctrl-hint">或點擊畫面選取對焦點</p>
         </div>
-        <div class="ctrl-group" v-if="motionStrength > 0">
-          <div class="ctrl-label">
-            模糊方向
-            <span class="ctrl-value">{{ ((motionAngle * 180) / Math.PI).toFixed(0) }}°</span>
+
+        <!-- Advanced settings -->
+        <details class="ctrl-details">
+          <summary class="ctrl-summary">進階設定</summary>
+
+          <div class="ctrl-group">
+            <div class="ctrl-label">
+              對比 <span class="ctrl-value">{{ contrast.toFixed(2) }}</span>
+            </div>
+            <input
+              type="range"
+              class="ctrl-slider"
+              min="0.5"
+              max="2"
+              step="0.05"
+              v-model.number="contrast"
+            />
           </div>
-          <input
-            type="range"
-            class="ctrl-slider"
-            min="0"
-            :max="Math.PI * 2"
-            step="0.1"
-            v-model.number="motionAngle"
-          />
+          <div class="ctrl-group">
+            <div class="ctrl-label">
+              飽和度 <span class="ctrl-value">{{ saturation.toFixed(2) }}</span>
+            </div>
+            <input
+              type="range"
+              class="ctrl-slider"
+              min="0"
+              max="2"
+              step="0.05"
+              v-model.number="saturation"
+            />
+          </div>
+          <div class="ctrl-group">
+            <div class="ctrl-label">
+              色溫
+              <span class="ctrl-value">
+                {{ colorTemp >= 0 ? "暖" : "冷" }} {{ Math.abs(colorTemp).toFixed(2) }}
+              </span>
+            </div>
+            <input
+              type="range"
+              class="ctrl-slider"
+              min="-1"
+              max="1"
+              step="0.05"
+              v-model.number="colorTemp"
+            />
+          </div>
+          <div class="ctrl-group">
+            <div class="ctrl-label">
+              暗角 <span class="ctrl-value">{{ vignetteStrength.toFixed(2) }}</span>
+            </div>
+            <input
+              type="range"
+              class="ctrl-slider"
+              min="0"
+              max="1"
+              step="0.05"
+              v-model.number="vignetteStrength"
+            />
+          </div>
+          <div class="ctrl-group">
+            <div class="ctrl-label">
+              動態模糊 <span class="ctrl-value">{{ motionStrength.toFixed(2) }}</span>
+            </div>
+            <input
+              type="range"
+              class="ctrl-slider"
+              min="0"
+              max="1"
+              step="0.05"
+              v-model.number="motionStrength"
+            />
+          </div>
+          <div class="ctrl-group" v-if="motionStrength > 0">
+            <div class="ctrl-label">
+              模糊方向
+              <span class="ctrl-value">{{ ((motionAngle * 180) / Math.PI).toFixed(0) }}°</span>
+            </div>
+            <input
+              type="range"
+              class="ctrl-slider"
+              min="0"
+              :max="Math.PI * 2"
+              step="0.1"
+              v-model.number="motionAngle"
+            />
+          </div>
+        </details>
+
+        <!-- Action buttons -->
+        <div class="ctrl-actions">
+          <button class="ctrl-btn ctrl-btn--reset" @click="onReset" title="重設相機參數">
+            重設參數
+          </button>
+          <button class="ctrl-btn" @click="onNewPhoto">換張照片</button>
         </div>
-      </details>
-
-      <!-- Depth result info -->
-      <div v-if="depthResult" class="ctrl-group ctrl-group--info">
-        <p>
-          景深推論：<strong>{{ depthResult.inferenceMs }} ms</strong>
-        </p>
-        <p>
-          圖片尺寸：<strong>{{ depthResult.width }} × {{ depthResult.height }}</strong>
-        </p>
-        <p>
-          估算焦距：<strong>{{ depthResult.focalLengthPx.toFixed(0) }} px</strong>
-        </p>
-      </div>
-
-      <!-- Action buttons -->
-      <div class="ctrl-actions">
-        <button class="ctrl-btn ctrl-btn--reset" @click="onReset" title="重設相機參數">
-          重設參數
-        </button>
-        <button class="ctrl-btn" @click="onNewPhoto">換張照片</button>
-      </div>
-    </aside>
+      </aside>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .viewfinder {
-  display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
-/* Canvas area */
+/* Canvas area — full size, controls float on top */
 .viewfinder__canvas-wrap {
-  flex: 1;
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -554,18 +546,34 @@ function onReset() {
   transform: translateX(20px);
 }
 
-/* Controls sidebar */
+/* ---- Floating glass controls panel ---- */
 .controls {
-  width: 270px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border);
-  background: var(--surface);
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  bottom: 16px;
+  width: 272px;
+  z-index: 10;
+
+  /* Glassmorphism */
+  background: rgba(10, 10, 14, var(--panel-alpha, 0.88));
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+
   padding: 14px 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
   font-size: 12px;
+
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
 
 .ctrl-group {
@@ -612,11 +620,11 @@ function onReset() {
 
 .ctrl-select {
   width: 100%;
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 5px 8px;
   font-size: 11px;
 }
 
@@ -628,9 +636,9 @@ function onReset() {
 .mode-btn {
   flex: 1;
   padding: 5px 4px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
   color: var(--text-dim);
   font-size: 11px;
   font-weight: 600;
@@ -644,7 +652,11 @@ function onReset() {
 .mode-btn--active {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(255, 153, 51, 0.08);
+  background: rgba(255, 153, 51, 0.12);
+}
+.mode-btn:hover:not(.mode-btn--active) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
 }
 
 /* Preset button rows */
@@ -655,9 +667,9 @@ function onReset() {
 }
 .preset-btn {
   padding: 3px 6px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
   color: var(--text-dim);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
@@ -668,20 +680,20 @@ function onReset() {
     background 0.1s;
 }
 .preset-btn:hover {
-  border-color: var(--accent-dim);
+  border-color: rgba(255, 153, 51, 0.4);
   color: var(--text);
 }
 .preset-btn--active {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(255, 153, 51, 0.08);
+  background: rgba(255, 153, 51, 0.12);
 }
 
 /* EV meter */
 .ev-bar-track {
   position: relative;
   height: 6px;
-  background: var(--border);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -704,7 +716,7 @@ function onReset() {
 
 /* Collapsible sections */
 .ctrl-details {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   padding-top: 10px;
 }
 .ctrl-summary {
@@ -726,42 +738,35 @@ details[open] .ctrl-summary::before {
   content: "▼ ";
 }
 
-/* Info block */
-.ctrl-group--info {
-  color: var(--text-dim);
-  line-height: 1.8;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-.ctrl-group--info strong {
-  color: var(--text);
-}
-
 /* Action buttons */
 .ctrl-actions {
   display: flex;
   gap: 6px;
   margin-top: auto;
+  padding-top: 4px;
 }
 .ctrl-btn {
   flex: 1;
   padding: 7px 10px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   color: var(--text-dim);
   font-size: 11px;
   cursor: pointer;
   transition:
     border-color 0.15s,
-    color 0.15s;
+    color 0.15s,
+    background 0.15s;
 }
 .ctrl-btn:hover {
-  border-color: var(--accent-dim);
+  border-color: rgba(255, 153, 51, 0.4);
   color: var(--text);
+  background: rgba(255, 255, 255, 0.07);
 }
 .ctrl-btn--reset:hover {
-  border-color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.5);
   color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.06);
 }
 </style>
