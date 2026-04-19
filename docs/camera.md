@@ -51,7 +51,7 @@ CoC (mm) = sensor_diagonal (mm) / 1500
 \text{DoF} = 2 \times u^2 \times N \times \frac{c}{f^2}
 ```
 
-- u = 對焦距離 (m，來自使用者滑桿或點擊對焦點)
+- u = 對焦距離 (m，來自 3DGS 場景幾何深度或使用者滑桿)
 - N = 光圈值
 - c = CoC (mm)，由當前選擇的感光元件決定
 - f = 焦距 (mm)
@@ -64,13 +64,17 @@ blur_radius (px) = |depth_pixel - focus_depth| × bokeh_scale_factor(N, f, senso
 
 其中 `bokeh_scale_factor` 同時受光圈、焦距、感光元件 CoC 影響，確保不同感光元件在相同等效參數下產生相同景深。
 
-### 對焦點選擇
+### 對焦點選擇（3D 場景版本）
 
-使用者點擊 CompareView 右側畫面的任意位置時：
-1. 從 depth texture 讀取該像素的深度值（公尺）
-2. 將此深度值設為 `focus_depth`
-3. Bokeh shader 依 `|depth - focus_depth|` 重新計算每個像素的模糊半徑
-4. 左側手機 pipeline 的 `focus_depth` 同步更新（但 CoC 保持手機基準值）
+使用者點擊 SceneViewer 畫面的任意位置時：
+
+1. 從 Three.js depth buffer 讀取該像素的深度值（NDC 轉換為線性深度）
+2. 反投影至世界座標，計算與相機的距離（公尺）
+3. 將此距離設為 `focus_depth`（公尺單位）
+4. Bokeh shader 依 `|depth - focus_depth|` 重新計算每個像素的模糊半徑
+5. 左右兩側 pipeline 的 `focus_depth` 同步更新（CoC 各自保持對應感光元件值）
+
+> **深度來源差異（vs main 分支）**：main 分支使用 Depth Pro 估算的 depth texture（相對深度值 0–1），需正規化。3d-interactive 分支的深度直接來自 3DGS 場景幾何（真實公尺單位），與 DoF 公式直接對應，物理更正確。
 
 ---
 
@@ -80,9 +84,8 @@ blur_radius (px) = |depth_pixel - focus_depth| × bokeh_scale_factor(N, f, senso
 
 | 葉片數 | 形狀 | 代表鏡頭 |
 |---|---|---|
-| 5 葉 | 五邊形 | 早期日系鏡頭 |
-| 7 葉 | 七邊形 | Canon L 系列（部分） |
-| 9 葉（圓形） | 圓形 | 現代高端鏡頭，高 f-number 接近圓形 |
+| 7 葉 | 七邊形 | Sony FE 50mm f/1.8（稍具特色的多邊形散景） |
+| 9 葉（近圓形） | 圓形 | Canon RF 50/1.8、Nikon Z 40/2、Fuji XF 35/2、Sony FE 85/1.8、Sigma 56/1.4 |
 | 自訂渦旋 | 旋轉橢圓 | 保留欄位供特殊鏡頭擴充 |
 
 Bokeh kernel 在 `bokeh.wgsl` 中以 Three.js TSL 計算多邊形形狀後傳入，效能敏感的卷積本體為原生 WGSL compute shader。
@@ -141,7 +144,7 @@ interface LensProfile {
 | 光圈 | f/1.8（等效全幅 f/8.6） | 幾乎全景深 |
 | 焦距 | 等效 26mm | 手機廣角主鏡頭 |
 | ISO noise curve | 手機 CMOS 特性 | chrominance noise 更明顯 |
-| 後處理 | 關閉（展示純感光元件差異） | 不加 AI 去噪模擬 |
+| 後處理 | 簡化版（無 chromAberr / motionBlur） | 展示純感光元件差異 |
 
 ---
 
@@ -153,6 +156,7 @@ interface LensProfile {
 | 快門速度 | 1/4000s – 30s + B | 影響動態模糊 + 曝光 |
 | ISO | 50 – 102400 | 影響雜訊強度 + 曝光 |
 | 焦距 | 14mm – 600mm | 影響 FOV 裁切 + 暗角 + 景深 |
-| 對焦距離 | 0.3m – ∞ | 影響景深平面位置（Depth Pro 提供公尺單位） |
+| 對焦距離 | 0.3m – ∞ | 從 3DGS 場景幾何取得（公尺單位） |
 | 感光元件 | FF / APS-C / M43 / 1-inch | 影響 CoC + 等效焦距 + 等效光圈 + noise curve |
-| 光圈葉片 | 5 / 7 / 9 / swirl | 影響 bokeh 形狀（由鏡頭 profile 決定） |
+| 光圈葉片 | 7 / 9 / swirl | 影響 bokeh 形狀（由鏡頭 profile 決定） |
+| Bokeh kernel size | 1px – 64px | 超過 64px 在 GTX 1650 Ti 上掉幀 |

@@ -1,295 +1,252 @@
-# Software Design Document: CamSim
+# Software Design Document: CamSim (3D Interactive)
 
-> Iterative SDD — Each phase builds on the previous one. Implement in order.
+> 分支 `3d-interactive`：3D Gaussian Splatting + 虛擬相機漫遊版本。
+> 相機 UI / 感光元件 / 鏡頭 / WGSL shader 沿用 main 分支，本文件著重描述差異部分。
 
 ---
 
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
-   - [1.1 Overall Execution Flow](#11-overall-execution-flow)
-2. [Phase 1: Core Pipeline](#2-phase-1-core-pipeline)
-3. [Phase 2: Image Effects Engine](#3-phase-2-image-effects-engine)
-   - [3.5 Shader Pipeline Sequence](#35-shader-pipeline-sequence)
-4. [Phase 3: Killer Feature × Camera UI](#4-phase-3-killer-feature--camera-ui)
-   - [4.5 Compare Mode Sequence](#45-compare-mode-sequence)
-5. [Phase 4: Polish](#5-phase-4-polish)
+2. [3D Reconstruction Pipeline](#2-3d-reconstruction-pipeline)
+3. [Frontend 3D Scene Rendering](#3-frontend-3d-scene-rendering)
+4. [Camera Effects Integration](#4-camera-effects-integration)
+5. [Compare Mode](#5-compare-mode)
 6. [Risks & Notes](#6-risks--notes)
 
 ---
 
 ## 1. Project Overview
 
-**Goal**: 讓使用者上傳一張照片，即時對比「手機拍攝效果」與「指定單眼相機參數（感光元件 + 鏡頭 + 曝光三角）的模擬效果」，搭配參數教學 HUD，使使用者直觀理解各光學參數的物理影響。
+**Goal**：使用者上傳一段多視角影片，後端重建 3D Gaussian Splatting 場景。前端載入場景後，使用者可自由移動虛擬相機位置，選擇感光元件與鏡頭，即時對比「手機效果」vs「單眼效果」。
 
 **Constraints**:
-- 本地全端部署，圖片不上傳至外部服務
-- 深度估計僅執行一次（per 圖片），後續全走前端 WebGPU
+- 本地全端部署，影片 / 場景資料不上傳至外部服務
+- 3DGS 重建僅執行一次（per 影片），結果快取於後端
+- 即時渲染和效果模擬全在前端 GPU（Three.js + WebGPU）
 - 目標瀏覽器：Chrome 113+（WebGPU 原生支援）
-- 後端 GPU：NVIDIA GTX 1650 Ti 4GB（VRAM 最低測試環境）
-- 前端：Vue 3 + VitePlus（vp）；後端：Python 3.12 + uv + FastAPI
+- 後端 GPU：NVIDIA GTX 1650 Ti 4GB（最低測試環境）
 
 ### 1.1 Overall Execution Flow
 
 ```mermaid
 flowchart TD
-  A[使用者上傳圖片] --> B{IndexedDB 查詢\nSHA-256 hash}
-  B -->|命中| C[還原 depth map]
-  B -->|未命中| D[POST /api/depth\nDepth Pro 推論]
-  D --> E[depth map 存入 IndexedDB]
-  E --> C
-  C --> F[圖片 + depth map → WebGPU textures]
-  F --> G{使用者操作}
-  G -->|調整感光元件 / 鏡頭 / 曝光參數| H[右側：單眼模擬 pipeline]
-  G -->|點擊對焦點| I[讀取 depth texture 該像素值\n→ 更新 focus_depth]
-  I --> H
-  F --> J[左側：手機基準 pipeline（固定參數）]
-  H --> K[CompareView 合成]
-  J --> K
-  K --> L[Canvas 顯示 + 教學 HUD 疊加]
+  A[使用者上傳影片] --> B{後端查詢快取\nSHA-256 hash}
+  B -->|命中| C[回傳既有 .splat 場景]
+  B -->|未命中| D[POST /api/reconstruct\n啟動重建 job]
+  D --> E[ffmpeg 抽幀]
+  E --> F[COLMAP SfM\n相機位姿估算]
+  F --> G[gsplat 3DGS 訓練]
+  G --> H[輸出 .splat + 存快取]
+  H --> C
+  C --> I[前端載入 .splat\nthree-gaussian-splats]
+  I --> J{使用者操作}
+  J -->|移動相機| K[Three.js 渲染當前視角]
+  J -->|調整感光元件/鏡頭/曝光| L[更新 WebGPU pipeline 參數]
+  J -->|點擊對焦點| M[ray-scene intersection\n取得深度值 → focus_depth]
+  K --> N[RGBA frame + depth\n傳入 WebGPU post-processing]
+  L --> N
+  M --> N
+  N --> O[CompareView 合成\n手機 vs 單眼]
+  O --> P[Canvas 顯示 + 教學 HUD]
 ```
 
 ---
 
-## 2. Phase 1: Core Pipeline
+## 2. 3D Reconstruction Pipeline
 
-### 2.1 Requirements
+### 2.1 Job 架構
 
-- FastAPI 後端：接收圖片、執行 Depth Pro 推論、回傳 depth map
-- 前端：圖片上傳 UI、WebGPU 初始化、depth map → GPU texture
-- IndexedDB 快取：相同圖片不重複呼叫後端
-- 第一個 shader：純 Gaussian blur 驗證管道通暢
+重建流程為非同步長時間任務，使用 FastAPI BackgroundTasks 管理：
 
-### 2.2 API Contract
+```python
+# 重建 job 狀態
+class JobStatus(Enum):
+    QUEUED = "queued"
+    EXTRACTING = "extracting"   # ffmpeg 抽幀
+    SFM = "sfm"                 # COLMAP SfM
+    TRAINING = "training"       # gsplat 3DGS 訓練
+    DONE = "done"
+    ERROR = "error"
 
-`POST /api/depth`
-
-```
-Request:  multipart/form-data  { file: image (JPEG/PNG/WebP, max 20MB) }
-Response: {
-  depth_map:        string   // base64 encoded 16-bit PNG
-  focal_length_px:  number   // Depth Pro 推算焦距（像素單位）
-  width:            number
-  height:           number
-  inference_ms:     number
-}
-```
-
-`GET /api/health`
-
-```
-Response: { status: "ok", model_loaded: boolean, device: string, vram_used_mb: number }
+class ReconstructJob:
+    job_id: str          # UUID
+    video_hash: str      # SHA-256
+    status: JobStatus
+    progress: float      # 0.0 – 1.0（訓練 iteration 進度）
+    splat_path: str | None
+    error: str | None
 ```
 
-### 2.3 IndexedDB 快取結構
+### 2.2 重建步驟
 
-| Key | Value |
-|---|---|
-| `depthCache:{sha256}` | `{ depthMapPng: ArrayBuffer, focalLengthPx: number, width: number, height: number }` |
+**Step 1：影片抽幀（ffmpeg）**
 
-快取於 `useDepthMap.ts` 管理，上傳前先計算 SHA-256，命中則跳過後端請求。
+```bash
+ffmpeg -i input.mp4 -vf fps=2 -q:v 2 frames/%04d.jpg
+```
 
-### 2.4 WebGPU 初始化流程
+- 預設 2fps 抽幀，確保相鄰幀間有足夠重疊（~70% overlap 為 COLMAP 最佳）
+- 最多抽 300 幀（避免 COLMAP 過慢）
+- 幀解析度降至 1280px 長邊（加速 SfM）
+
+**Step 2：COLMAP SfM**
+
+```
+feature_extractor → exhaustive_matcher → mapper → model_converter
+```
+
+輸出：`sparse/0/` 內的 `cameras.bin / images.bin / points3D.bin`（轉成 TXT 格式供 gsplat 讀取）
+
+**Step 3：gsplat 3DGS 訓練**
+
+```python
+from gsplat import rasterization
+
+# 訓練配置
+trainer = GaussianTrainer(
+    data_dir="colmap_output/",
+    max_steps=7000,          # 快速重建用 7000，精細用 30000
+    strategy="default",
+)
+trainer.train()
+trainer.export_splat("scene.splat")
+```
+
+### 2.3 快取策略
+
+```
+backend/scenes/
+└── {video_sha256}/
+    ├── scene.splat         # 主要輸出（供前端下載）
+    ├── colmap/             # COLMAP 中間結果
+    └── meta.json           # 重建時間、幀數、訓練 steps 等 metadata
+```
+
+若 `{video_sha256}/scene.splat` 存在，直接跳過重建回傳檔案路徑。
+
+---
+
+## 3. Frontend 3D Scene Rendering
+
+### 3.1 SceneViewer 元件
+
+使用 GaussianSplats3D（three-gaussian-splats）渲染 .splat：
+
+```ts
+import { Viewer as SplatViewer } from "@mkkellogg/gaussian-splats-3d";
+
+const viewer = new SplatViewer({
+  renderer: threeRenderer,
+  camera: perspectiveCamera,
+  gpuAcceleratedSort: true,
+});
+await viewer.addSplatScene(splatUrl);
+viewer.start();
+```
+
+渲染迴圈每幀：
+1. Three.js 渲染至 `WebGLRenderTarget`
+2. 讀出 RGBA texture + depth buffer
+3. 傳入 WebGPU post-processing pipeline
+
+### 3.2 相機控制模式
+
+| 模式 | 操作 | 適用場景 |
+|---|---|---|
+| Orbit | 滑鼠拖動旋轉、滾輪縮放、右鍵平移 | 靜態場景觀察 |
+| FPS | WASD 移動、滑鼠看方向（pointer lock） | 場景內部漫遊 |
+
+`useScene.ts` 管理：當前模式、相機 position/quaternion、目標焦點。
+
+### 3.3 深度取樣
+
+使用者點擊畫面對焦時：
 
 ```mermaid
 flowchart TD
-  A[gpu/pipeline.ts 初始化] --> B{navigator.gpu 存在？}
-  B -->|否| C[顯示 WebGPU 不支援提示\n結束]
-  B -->|是| D[requestAdapter → requestDevice]
-  D --> E[建立 image texture + depth texture]
-  E --> F[載入第一個 shader: gaussian.wgsl]
-  F --> G[render loop 就緒]
+  A["點擊 canvas 座標 (x, y)"] --> B["Three.js Raycaster"]
+  B --> C["ray-scene intersection\n（對 3DGS Splat 做近似射線測試）"]
+  C --> D["取得交點深度（公尺）"]
+  D --> E["更新 cameraStore.focusDepth"]
+  E --> F["bokeh.wgsl 更新 focus_depth uniform"]
 ```
 
-### 2.5 VRAM 管理規則
-
-- 同時只保留當前圖片的 depth texture
-- 使用者切換圖片時，舊 texture 顯式呼叫 `.destroy()`
-- `GET /api/health` 的 `vram_used_mb` 供開發期監控
+3DGS 沒有傳統 mesh 幾何，近似方式為：從 depth buffer 讀取點擊位置的深度值，再反投影為世界座標距離。
 
 ---
 
-## 3. Phase 2: Image Effects Engine
+## 4. Camera Effects Integration
 
-### 3.1 Requirements
-
-- 實作所有 WGSL compute shader（exposure、noise、bokeh、motionBlur、vignette）
-- 曝光計算邏輯與拍攝模式（M / A / S / P）
-- 感光元件系統（CoC、crop factor、noise curve）
-- 即時直方圖
-
-### 3.2 Shader Pipeline 順序
+### 4.1 Shader Pipeline（沿用 main 分支）
 
 ```
+3DGS 渲染幀 (RGBA texture)
+    ↓
 exposure → noise → bokeh (depth-aware) → motionBlur → vignette → chromAberr
+    ↓
+輸出 texture → CompareView 合成
 ```
 
-每個 pass 的 input/output 為 `GPUTexture`（`rgba16float`），通過 compute shader 寫入下一張 texture。
+深度來源從原本的 Depth Pro depth texture 改為 Three.js depth buffer（場景幾何深度），直接對應真實 3D 距離。
 
-### 3.3 感光元件資料結構（`data/sensors.ts`）
+### 4.2 Texture 傳遞
 
 ```ts
-interface SensorProfile {
-  id: string              // 'ff' | 'apsc_sony' | 'apsc_canon' | 'm43' | '1inch' | 'phone'
-  label: string           // 顯示名稱
-  cropFactor: number      // 相對全幅的 crop factor
-  cocMm: number           // Circle of Confusion (mm)
-  noiseCurveCoeff: number // ISO noise 強度係數（phone 值最高）
-  chrominanceNoiseBias: number // chrominance noise 偏移量
-}
+// Three.js render target 輸出
+const renderTarget = new THREE.WebGLRenderTarget(width, height, {
+  depthTexture: new THREE.DepthTexture(width, height),
+  type: THREE.FloatType,
+});
+
+// 讀出供 WebGPU 使用
+const colorTexture = renderTarget.texture;   // RGBA
+const depthTexture = renderTarget.depthTexture; // depth32float
 ```
 
-| id | cropFactor | cocMm |
-|---|---|---|
-| `ff` | 1.0 | 0.030 |
-| `apsc_sony` | 1.5 | 0.020 |
-| `apsc_canon` | 1.6 | 0.019 |
-| `m43` | 2.0 | 0.015 |
-| `1inch` | 2.7 | 0.011 |
-| `phone` | 4.8 | 0.006 |
-
-### 3.4 拍攝模式邏輯（`useCamera.ts`）
-
-| 模式 | 使用者控制 | 自動計算 |
-|---|---|---|
-| M（手動） | 光圈、快門、ISO | — |
-| A（光圈優先） | 光圈、ISO | 快門（對應目標 EV） |
-| S（快門優先） | 快門、ISO | 光圈（對應目標 EV） |
-| P（程序） | — | 光圈 + 快門（按場景亮度自動配對） |
-
-曝光公式：`EV = log2(N²/t) - log2(ISO/100)`
-
-### 3.5 Shader Pipeline Sequence
-
-```mermaid
-sequenceDiagram
-  participant UI as Vue UI
-  participant Store as cameraStore (Pinia)
-  participant FX as useImageFX.ts
-  participant GPU as WebGPU Pipeline
-
-  UI->>Store: 使用者調整光圈/ISO/快門
-  Store->>FX: 參數變更事件
-  FX->>GPU: updateUniforms(exposure, noise, bokeh params)
-  GPU->>GPU: exposure.wgsl compute pass
-  GPU->>GPU: noise.wgsl compute pass
-  GPU->>GPU: bokeh.wgsl (depth-aware, depthWeightedBlend)
-  GPU->>GPU: motionBlur.wgsl
-  GPU->>GPU: vignette.wgsl
-  GPU->>UI: Canvas 更新
-```
-
----
-
-## 4. Phase 3: Killer Feature × Camera UI
-
-### 4.1 Requirements
-
-- `CompareView`：左右分割畫面（手機基準 vs 單眼模擬），分割線可拖動
-- 感光元件選擇（`SensorSelector`）+ 鏡頭選擇（`LensSelector`）
-- 對焦點點擊選取
-- 參數教學 HUD
-- 擬真相機 UI（轉盤、觀景窗）
-
-### 4.2 Compare Mode 雙 Pipeline
-
-兩條 pipeline 共用同一份 depth texture 和 image texture，參數各自獨立：
+### 4.3 雙 Pipeline 參數
 
 | | 左側（手機基準） | 右側（單眼模擬） |
 |---|---|---|
+| 渲染幀 | 共用同一 3DGS 渲染幀（相同視角） | 同上 |
 | 感光元件 | `phone`（固定） | 使用者選擇 |
 | 光圈 | f/1.8（等效 f/8.6） | 使用者設定 |
-| 焦距 | 等效 26mm（固定） | 使用者設定 |
 | ISO noise curve | phone 係數 | sensor-aware 係數 |
-| 後處理 | 關閉 | 完整 pipeline |
+| 後處理 | 簡化版（無 chromAberr / motionBlur） | 完整 pipeline |
 
-`useCompare.ts` 管理：分割線 X 座標（`splitX: number`，0–1）、手機基準固定參數物件。
+---
 
-### 4.3 鏡頭資料結構（`data/lenses.ts`）
+## 5. Compare Mode
 
-```ts
-interface LensProfile {
-  id: string
-  name: string              // 顯示名稱
-  focalLength: number       // 焦距 (mm)
-  maxAperture: number       // 最大光圈 f-number
-  blades: number            // 光圈葉片數
-  bokehShape: 'circle' | 'polygon' | 'swirl'
-  swirlStrength?: number    // 0–1，僅 swirl 類型
-  vignetteProfile: number   // 暗角強度係數 0–1
-  chromaProfile: number     // 色差強度係數 0–1
-  characterNote: string     // 教學 HUD 顯示文字
-}
-```
-
-內建鏡頭：Canon RF 50mm f/1.8 STM、Nikon Z 40mm f/2、Fujifilm XF 35mm f/2 R WR、Sony FE 50mm f/1.8、Sony FE 85mm f/1.8、Sigma 56mm f/1.4 DC DN
-
-### 4.4 對焦點選擇邏輯
-
-```mermaid
-flowchart TD
-  A["使用者點擊 Viewfinder 畫面"] --> B["取得點擊座標 xy"]
-  B --> C["從 depth texture 讀取該像素深度值\n gpu/textureUtils.ts sampleDepth(x, y)"]
-  C --> D["更新 cameraStore.focusDepth"]
-  D --> E["bokeh.wgsl uniform 更新 focus_depth"]
-  E --> F["左右兩側 pipeline 同步重算模糊半徑"]
-```
-
-### 4.5 Compare Mode Sequence
+### 5.1 Compare Mode Sequence
 
 ```mermaid
 sequenceDiagram
   participant User
-  participant CV as CompareView
+  participant Scene as SceneViewer (3DGS)
   participant LP as 左側 Pipeline (phone)
   participant RP as 右側 Pipeline (user)
   participant Canvas
 
-  User->>CV: 拖動分割線
-  CV->>CV: 更新 splitX
-  CV->>Canvas: 重組合成（clip left/right）
+  User->>Scene: 移動虛擬相機
+  Scene->>Scene: Three.js 渲染當前視角
+  Scene->>LP: RGBA frame + depth buffer
+  Scene->>RP: RGBA frame + depth buffer（共用）
+
+  LP->>Canvas: 手機基準後處理
+  RP->>Canvas: 單眼模擬後處理
+
+  User->>Canvas: 拖動分割線
+  Canvas->>Canvas: 重組合成（clip left/right）
 
   User->>RP: 調整感光元件 / 鏡頭 / 光圈
-  RP->>RP: 重算 bokeh params（CoC、kernel shape）
+  RP->>RP: 重算 bokeh params
   RP->>Canvas: 更新右側區域
-
-  Note over LP: 左側 pipeline 全程固定，不因使用者操作重算
 ```
 
-### 4.6 教學 HUD 內容規則
+### 5.2 焦點同步
 
-每個參數的說明文字在 `data/lenses.ts` / `data/sensors.ts` 中定義，顯示規則：
-
-| 觸發條件 | HUD 顯示內容 |
-|---|---|
-| 調整光圈 | 目前景深範圍估算（公尺）+ 等效全幅光圈（若非 FF 感光元件） |
-| 調整 ISO | 當前感光元件在此 ISO 的訊雜比估算（dB） |
-| 調整快門 | 動態模糊起始閾值（依目前焦距換算安全快門） |
-| 選擇鏡頭 | `LensProfile.characterNote` |
-| 選擇感光元件 | 等效焦距換算結果 + CoC 數值 |
-
----
-
-## 5. Phase 4: Polish
-
-### 5.1 Requirements
-
-- `chromAberr.wgsl`：邊緣 RGB 通道偏移，強度由鏡頭 `chromaProfile` 決定
-- 焦段 FOV 計算：`fov = 2 × atan(sensor_diagonal / (2 × focal_length))`，連動 crop factor 做透視裁切
-- 導出處理後照片（Canvas `toBlob` → 下載）
-- 鍵盤快捷鍵（`←` / `→` 微調當前選中參數）
-- 快門音效（機械 / 電子切換）
-- 模式轉盤動畫
-
-### 5.2 FOV 裁切邏輯
-
-```
-sensor_diagonal = sqrt(sensor_width² + sensor_height²)  // 單位 mm
-fov_rad = 2 × atan(sensor_diagonal / (2 × focal_length))
-crop_scale = tan(reference_fov / 2) / tan(fov_rad / 2)  // 相對標準視角的縮放比
-```
-
-在 `exposure.wgsl` pass 中套用 UV 偏移實現 FOV 裁切（不額外增加 pass）。
+點擊對焦後，`focus_depth` 同步更新左右兩側 pipeline。左側手機基準的 CoC 維持 phone 值，但焦平面位置與右側相同。
 
 ---
 
@@ -297,30 +254,38 @@ crop_scale = tan(reference_fov / 2) / tan(fov_rad / 2)  // 相對標準視角的
 
 ### 6.1 技術風險
 
-| 風險 | 說明 |
+| 風險 | 說明 | 緩解策略 |
+|---|---|---|
+| COLMAP SfM 失敗率 | 影片移動太快、光線不足、重疊不夠時 SfM 可能失敗 | 回傳明確錯誤訊息 + 建議重拍指引 |
+| 3DGS 訓練時間 | GTX 1650 Ti 上 7000 steps 約 10–20 分鐘 | 進度條 + SSE 即時回報；快取避免重複訓練 |
+| .splat 檔案過大 | 複雜場景 .splat 可達 500MB+ | 訓練時限制 Gaussian 數量；前端串流載入 |
+| depth buffer 精度 | Three.js depth buffer 在遠景精度下降（logarithmic depth buffer 可改善） | 對焦距離 clamp 至合理範圍，遠景設最大 DoF |
+| Three.js ↔ WebGPU texture 橋接 | WebGL 和 WebGPU context 無法直接共用 texture | 使用 canvas readPixels 或 WebGPU import WebGL texture extension |
+| GTX 1650 Ti VRAM | 3DGS 訓練約佔 3–4GB；前端渲染 + WebGPU post-processing 另需 1–2GB | 後端訓練完成後清除中間 GPU 佔用；前端渲染和訓練不同時進行 |
+
+### 6.2 Three.js ↔ WebGPU Texture 橋接方案
+
+**方案 A（優先嘗試）**：`WEBGL_multi_draw` + canvas 中轉
+```
+Three.js 渲染 → offscreen canvas → createImageBitmap → WebGPU copyExternalImageToTexture
+```
+缺點：每幀 CPU 回讀，有延遲（~1–2ms）。
+
+**方案 B（最佳效能）**：使用 WebGPU renderer 替代 WebGL renderer，three-gaussian-splats 切換至 WebGPU 路徑，texture 原生共用。Three.js r168+ WebGPU renderer 仍在 beta，穩定性需評估。
+
+### 6.3 建議實作順序
+
+```
+Phase 1 → 驗證後端 COLMAP + gsplat pipeline（能輸出可用 .splat）
+Phase 2 → 驗證前端 three-gaussian-splats 渲染（能在場景中移動）
+Phase 3 → 驗證 WebGPU post-processing 接入（bokeh 效果正確）
+Phase 4 → 驗證 CompareView（手機 vs 單眼差異明顯）
+```
+
+### 6.4 影片拍攝建議（使用者指引）
+
+| 場景類型 | 建議拍攝方式 |
 |---|---|
-| Depth Pro 在 Windows + CUDA 的相容性 | 官方主要測試 Linux + Apple Silicon；Windows 環境需社群安裝指引，安裝失敗率較高 |
-| GTX 1650 Ti VRAM 不足（4GB） | Depth Pro 約佔 2.5GB，depth texture + image texture 需嚴格管理，切換圖片必須先 `.destroy()` |
-| WebGPU bokeh 卷積效能 | 大 kernel size（f/1.2 + 遠景）在低階 GPU 上可能掉幀；需實作自適應 kernel size 上限 |
-| Three.js TSL 穩定性 | TSL 仍在快速迭代，API 可能在次版本異動；bokeh polygon 幾何計算部分需設隔離層，便於替換為純 WGSL |
-| NumPy 2.x API 異動 | 固定 `~2.1`，升級前需驗證 PyTorch + Pillow 相容性 |
-
-### 6.2 建議實作順序
-
-```
-Phase 1 → 驗證 depth map pipeline 通暢（能看到分層模糊）
-Phase 2 → 驗證所有 shader 視覺正確，感光元件切換有景深差異
-Phase 3 → 驗證 CompareView 左右視覺差異明顯，教學 HUD 說明準確
-Phase 4 → 驗證 FOV 裁切視角正確，導出圖片品質可接受
-```
-
-### 6.3 關鍵參數邊界值
-
-| 參數 | Min | Max | 說明 |
-|---|---|---|---|
-| 光圈 | f/1.0 | f/22 | f/1.0 以下無現實鏡頭參考，不支援 |
-| 快門 | 1/4000s | 30s + B | B 門為無限時間，motion blur 設最大值 |
-| ISO | 50 | 102400 | 超過 6400 noise 係數指數成長 |
-| 焦距 | 14mm | 600mm | 超望遠 FOV 裁切會使解析度嚴重降低 |
-| 對焦距離 | 0.3m | ∞ | ∞ 對應 depth texture 最遠層 |
-| Bokeh kernel size | 1px | 64px | 超過 64px 在 GTX 1650 Ti 上掉幀 |
+| 室內小場景 | 繞物體一圈，維持 50–70% 幀間重疊 |
+| 室外建築 | 水平弧形移動，保持建築物始終在畫面中 |
+| 不適合 | 純旋轉（原地轉圈）、移動太快、光線不足 |
