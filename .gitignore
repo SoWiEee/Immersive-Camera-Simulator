@@ -16,3 +16,6 @@ backend/models/
 # Frontend build / lock
 frontend/package-lock.json
 frontend/dist/
+
+# 3DGS scene cache (can be hundreds of MB — regenerate with POST /api/reconstruct)
+backend/scenes/*/
