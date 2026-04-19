@@ -11,12 +11,14 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7",
     "@vueuse/core": "^11.0.0",
     "pinia": "^2.2.0",
     "three": "^0.168.0",
     "vue": "^3.5.0"
   },
   "devDependencies": {
+    "@types/three": "^0.184.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "@vitest/ui": "^2.0.0",
     "@vue/tsconfig": "^0.7.0",
