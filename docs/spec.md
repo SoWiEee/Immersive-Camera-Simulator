@@ -181,28 +181,46 @@ flowchart TD
 ### 4.1 Shader Pipeline（沿用 main 分支）
 
 ```
-3DGS 渲染幀 (RGBA texture)
+3DGS 渲染幀 (RGBA, WebGL canvas)
+    ↓ copyExternalImageToTexture (per-frame, ~1ms)
+WebGPU rgba8unorm texture
     ↓
-exposure → noise → bokeh (depth-aware) → motionBlur → vignette → chromAberr
+exposure → noise → bokeh → motionBlur → vignette → blit
     ↓
-輸出 texture → CompareView 合成
+WebGPU canvas（疊在 GS3D canvas 之上）
 ```
 
-深度來源從原本的 Depth Pro depth texture 改為 Three.js depth buffer（場景幾何深度），直接對應真實 3D 距離。
+由 `useEffects.ts` 驅動，每個 RAF tick 抓 GS3D 的 WebGL canvas frame 灌進 `CamSimPipeline.uploadFrame()`，
+取代舊的「載入靜態 File」流程。
 
-### 4.2 Texture 傳遞
+### 4.2 Texture 橋接（採方案 A — per-frame canvas readback）
+
+WebGL 與 WebGPU 屬於不同 GPU context，texture 無法直接共用。實作上：
 
 ```ts
-// Three.js render target 輸出
-const renderTarget = new THREE.WebGLRenderTarget(width, height, {
-  depthTexture: new THREE.DepthTexture(width, height),
-  type: THREE.FloatType,
-});
-
-// 讀出供 WebGPU 使用
-const colorTexture = renderTarget.texture;   // RGBA
-const depthTexture = renderTarget.depthTexture; // depth32float
+// 每 frame：把 GS3D 的 WebGL canvas 當外部影像來源
+device.queue.copyExternalImageToTexture(
+  { source: gs3dCanvas },
+  { texture: imageTexture },
+  [width, height],
+);
 ```
+
+`copyExternalImageToTexture` 在現代 GPU 約 0.5–2 ms（1080p），對 30 FPS 目標可接受。
+較高效能的方案 B（共用 WebGPU renderer + GPU texture import）等 Three.js WebGPU renderer 穩定後再評估。
+
+### 4.3 Depth 來源（已知限制）
+
+`@mkkellogg/gaussian-splats-3d` 不對外輸出 per-pixel depth buffer。
+本 phase 採用務實的近似策略：
+
+- **對焦點深度**：點擊 canvas 時用 `THREE.Raycaster` 對 `splatMesh` 投射射線，
+  取交點到相機距離（單位：公尺）寫進 `cameraStore.focusDepth`。
+- **Bokeh depth uniform**：以「相機到對焦點距離」當作整幀均勻深度。
+  shader 中 `|center_depth - focus_depth| ≈ 0`，因此 bokeh radius 近乎 0
+  → 散景在此模式下「對焦範圍內全清晰，超出就一致模糊」，**不是真正的景深分層**。
+
+要恢復 main 分支那種精準景深，需要 fork GS3D 多輸出一個 depth attachment（見 roadmap Phase 4）。
 
 ### 4.3 雙 Pipeline 參數
 

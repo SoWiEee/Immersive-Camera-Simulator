@@ -3,16 +3,27 @@ import { ref, onMounted, onUnmounted, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useCameraStore } from "@/stores/cameraStore";
 import { useScene, type ControlMode } from "@/composables/useScene";
+import { useEffects } from "@/composables/useEffects";
 import { SENSORS } from "@/data/sensors";
 import { LENSES } from "@/data/lenses";
 
 const store = useCameraStore();
-const { sceneUrl, panelOpacity, aperture, iso, focalLength, focusDepth, shootingMode } =
-  storeToRefs(store);
+const {
+  sceneUrl,
+  panelOpacity,
+  aperture,
+  iso,
+  focalLength,
+  focusDepth,
+  shootingMode,
+  effectsEnabled,
+} = storeToRefs(store);
 
 const scene = useScene();
+const effects = useEffects();
 
 const containerRef = ref<HTMLElement | null>(null);
+const effectsCanvasRef = ref<HTMLCanvasElement | null>(null);
 
 // ── Draggable panel ───────────────────────────────────────────────────────────
 const dragOffsetX = ref(0);
@@ -48,9 +59,11 @@ function onPanelDragEnd() {
 onMounted(async () => {
   if (!containerRef.value || !sceneUrl.value) return;
   await scene.init(containerRef.value, sceneUrl.value);
+  await initEffects();
 });
 
 onUnmounted(() => {
+  effects.dispose();
   scene.dispose();
   window.removeEventListener("mousemove", onPanelDragMove);
   window.removeEventListener("mouseup", onPanelDragEnd);
@@ -59,14 +72,38 @@ onUnmounted(() => {
 // Reload if scene URL changes (e.g., user uploads a new video)
 watch(sceneUrl, async (url) => {
   if (!url || !containerRef.value) return;
+  effects.stop();
   scene.dispose();
   await scene.init(containerRef.value, url);
+  await initEffects();
 });
+
+// Toggle effects loop on/off
+watch(effectsEnabled, (on) => {
+  if (on) effects.start();
+  else effects.stop();
+});
+
+async function initEffects() {
+  const source = scene.getRenderCanvas();
+  const out = effectsCanvasRef.value;
+  if (!source || !out) return;
+  await effects.init(out, source);
+  if (effectsEnabled.value) effects.start();
+}
 
 // ── Control mode helpers ──────────────────────────────────────────────────────
 
 function setMode(mode: ControlMode) {
   scene.setControlMode(mode);
+}
+
+// ── Click-to-focus ────────────────────────────────────────────────────────────
+// In FPS mode the canvas captures clicks for pointer-lock; only run in orbit.
+function onSceneClick(e: MouseEvent) {
+  if (scene.controlMode.value !== "orbit" || !containerRef.value) return;
+  const distance = scene.sampleDepthAtScreen(containerRef.value, e.clientX, e.clientY);
+  store.focusDepth = distance;
 }
 
 // ── Shutter / ISO stop grids (same as Viewfinder) ────────────────────────────
@@ -106,7 +143,14 @@ function isShutterActive(v: number): boolean {
 <template>
   <div class="sv-root">
     <!-- 3DGS rendering container (GaussianSplats3D appends its canvas here) -->
-    <div ref="containerRef" class="sv-canvas" />
+    <div ref="containerRef" class="sv-canvas" @click="onSceneClick" />
+
+    <!-- WebGPU camera-effects overlay (mirrors the GS3D canvas, post-processed) -->
+    <canvas
+      ref="effectsCanvasRef"
+      class="sv-effects-canvas"
+      :class="{ 'sv-effects-canvas--visible': effectsEnabled && scene.isLoaded.value }"
+    />
 
     <!-- Loading overlay -->
     <Transition name="fade">
@@ -142,6 +186,31 @@ function isShutterActive(v: number): boolean {
       >
         FPS
       </button>
+    </div>
+
+    <!-- Effects on/off toggle -->
+    <div v-if="scene.isLoaded.value" class="sv-effects-toggle">
+      <button
+        class="mode-btn"
+        :class="{ 'mode-btn--active': !effectsEnabled }"
+        title="原始 3DGS 影像"
+        @click="effectsEnabled = false"
+      >
+        原始
+      </button>
+      <button
+        class="mode-btn"
+        :class="{ 'mode-btn--active': effectsEnabled }"
+        title="套用相機模擬效果（曝光、雜訊、暗角、運動模糊）"
+        @click="effectsEnabled = true"
+      >
+        模擬
+      </button>
+    </div>
+
+    <!-- Focus / pose chips (debug-friendly readouts) -->
+    <div v-if="scene.isLoaded.value && scene.controlMode.value === 'orbit'" class="sv-focus-hint">
+      點擊場景以對焦 &nbsp;|&nbsp; 對焦距離 {{ store.focusDepth.toFixed(2) }} m
     </div>
 
     <!-- FPS pointer-lock hint -->
@@ -394,6 +463,21 @@ function isShutterActive(v: number): boolean {
   height: 100% !important;
 }
 
+/* WebGPU effects overlay — sits above the GS3D canvas, hidden when off */
+.sv-effects-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* clicks fall through to .sv-canvas for raycast */
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 5;
+}
+.sv-effects-canvas--visible {
+  opacity: 1;
+}
+
 /* ── Overlays ────────────────────────────────────────────────────────────── */
 .sv-overlay {
   position: absolute;
@@ -450,10 +534,10 @@ function isShutterActive(v: number): boolean {
 }
 
 /* ── Control mode toggle ─────────────────────────────────────────────────── */
-.sv-mode-toggle {
+.sv-mode-toggle,
+.sv-effects-toggle {
   position: absolute;
   top: 12px;
-  right: 12px;
   display: flex;
   gap: 2px;
   background: rgba(10, 10, 14, 0.7);
@@ -462,6 +546,26 @@ function isShutterActive(v: number): boolean {
   padding: 2px;
   z-index: 30;
   backdrop-filter: blur(8px);
+}
+.sv-mode-toggle {
+  right: 12px;
+}
+.sv-effects-toggle {
+  right: 168px; /* sit to the left of the orbit/FPS toggle */
+}
+.sv-focus-hint {
+  position: absolute;
+  top: 50px;
+  right: 12px;
+  padding: 4px 10px;
+  background: rgba(10, 10, 14, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  z-index: 30;
+  backdrop-filter: blur(6px);
+  font-variant-numeric: tabular-nums;
 }
 .mode-btn {
   padding: 4px 14px;

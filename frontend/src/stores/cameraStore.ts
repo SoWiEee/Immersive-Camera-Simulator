@@ -42,6 +42,12 @@ export const useCameraStore = defineStore("camera", () => {
   const compareMode = ref<boolean>(true);
   const teachingMode = ref<boolean>(false);
   const panelOpacity = ref<number>(0.88);
+  const effectsEnabled = ref<boolean>(true); // overlay WebGPU camera effects on the 3DGS view
+
+  // ── Virtual camera pose (synced from Three.js each frame) ─────────────────
+  // Stored as plain tuples to keep Pinia reactivity cheap (no Three.js objects).
+  const virtualCameraPos = ref<[number, number, number]>([0, 0, 0]);
+  const virtualCameraQuat = ref<[number, number, number, number]>([0, 0, 0, 1]);
 
   // ── Sensor ────────────────────────────────────────────────────────────────
   const selectedSensorId = ref<string>(DEFAULTS.selectedSensorId);
@@ -115,6 +121,14 @@ export const useCameraStore = defineStore("camera", () => {
     reconstructionProgress.value = progress;
   }
 
+  function setVirtualCameraPose(
+    pos: [number, number, number],
+    quat: [number, number, number, number],
+  ) {
+    virtualCameraPos.value = pos;
+    virtualCameraQuat.value = quat;
+  }
+
   function autoComputeExposure() {
     const targetEV = 13;
     if (shootingMode.value === "A") {
@@ -161,6 +175,10 @@ export const useCameraStore = defineStore("camera", () => {
     compareMode,
     teachingMode,
     panelOpacity,
+    effectsEnabled,
+    // Virtual camera
+    virtualCameraPos,
+    virtualCameraQuat,
     // Sensor
     selectedSensorId,
     sensor,
@@ -195,6 +213,7 @@ export const useCameraStore = defineStore("camera", () => {
     setJobId,
     setSceneUrl,
     setReconstructionProgress,
+    setVirtualCameraPose,
     autoComputeExposure,
     resetCameraParams,
   };

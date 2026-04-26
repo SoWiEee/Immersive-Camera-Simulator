@@ -2,15 +2,31 @@
  * 3DGS scene management composable.
  *
  * Wraps GaussianSplats3D.Viewer lifecycle, exposes Orbit / FPS control modes,
- * and provides a depth-sampling stub (implemented in Phase 3).
+ * syncs the virtual camera pose into cameraStore each frame, and provides a
+ * Three.js Raycaster-backed depth sampler for click-to-focus.
  */
 
 import { ref, shallowRef } from "vue";
-import type * as THREE from "three";
+import * as THREE from "three";
+import { useCameraStore } from "@/stores/cameraStore";
 
 export type ControlMode = "orbit" | "fps";
 
+interface GS3DViewer {
+  camera: THREE.PerspectiveCamera;
+  controls: { enabled: boolean } | null;
+  renderer: THREE.WebGLRenderer;
+  threeScene: THREE.Scene;
+  splatMesh?: THREE.Object3D;
+  addSplatScene(url: string, opts?: object): Promise<void>;
+  start(): void;
+  stop(): void;
+  dispose(): void;
+}
+
 export function useScene() {
+  const store = useCameraStore();
+
   const isLoading = ref(false);
   const isLoaded = ref(false);
   const loadProgress = ref(0);
@@ -18,9 +34,14 @@ export function useScene() {
   const controlMode = ref<ControlMode>("orbit");
   const isFpsLocked = ref(false);
 
-  // Kept as shallowRef so Vue doesn't walk Three.js object graphs
+  // shallowRef: don't make Vue walk the Three.js graph
   const viewer = shallowRef<GS3DViewer | null>(null);
   let fps: FpsController | null = null;
+  let poseRafId = 0;
+
+  // Reused for click-to-focus to avoid per-call allocations
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -31,7 +52,6 @@ export function useScene() {
     loadProgress.value = 0;
 
     try {
-      // Dynamic import so the large library is only fetched when needed
       const GS3D = await import("@mkkellogg/gaussian-splats-3d");
 
       const v = new GS3D.Viewer({
@@ -39,8 +59,8 @@ export function useScene() {
         selfDrivenMode: true,
         useBuiltInControls: true,
         gpuAcceleratedSort: true,
-        sharedMemoryForWorkers: false, // safer cross-origin default
-      }) as GS3DViewer;
+        sharedMemoryForWorkers: false,
+      }) as unknown as GS3DViewer;
 
       await v.addSplatScene(splatUrl, {
         progressiveLoad: true,
@@ -53,8 +73,8 @@ export function useScene() {
       viewer.value = v;
       isLoaded.value = true;
 
-      // Attach FPS controller now that we have a camera
-      fps = new FpsController(v.camera as THREE.PerspectiveCamera, container, isFpsLocked);
+      fps = new FpsController(v.camera, container, isFpsLocked);
+      startPoseSync();
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -77,20 +97,77 @@ export function useScene() {
   }
 
   /**
-   * Sample scene depth at canvas pixel (x, y) in [0, 1] normalised coordinates.
-   * Returns a depth in metres (approximate).
-   * Full implementation deferred to Phase 3 (requires render-target readback).
+   * Get the WebGL canvas GS3D is rendering into. Used by useEffects to
+   * source per-frame textures.
    */
-  function sampleDepth(_x: number, _y: number): number {
-    return 5.0; // placeholder — Phase 3 will read from the depth buffer
+  function getRenderCanvas(): HTMLCanvasElement | null {
+    return viewer.value?.renderer.domElement ?? null;
+  }
+
+  /**
+   * Cast a ray from a canvas-relative pixel into the splat scene and return
+   * the distance (metres) from the camera to the first hit. Falls back to
+   * the previous focusDepth (or 5m if unset) when nothing intersects.
+   */
+  function sampleDepthAtScreen(canvas: HTMLElement, clientX: number, clientY: number): number {
+    const v = viewer.value;
+    if (!v) return store.focusDepth;
+
+    const rect = canvas.getBoundingClientRect();
+    ndc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    raycaster.setFromCamera(ndc, v.camera);
+
+    if (v.splatMesh) {
+      const hits = raycaster.intersectObject(v.splatMesh, true);
+      if (hits.length > 0) return hits[0].distance;
+    }
+
+    // Fallback: intersect a virtual "focus plane" at the current focus
+    // distance in front of the camera. Keeps the click meaningful even when
+    // the splat raycast misses.
+    const fallbackPlane = new THREE.Plane();
+    const camForward = new THREE.Vector3();
+    v.camera.getWorldDirection(camForward);
+    const planePoint = v.camera.position.clone().add(camForward.multiplyScalar(store.focusDepth));
+    fallbackPlane.setFromNormalAndCoplanarPoint(camForward.normalize(), planePoint);
+    const target = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(fallbackPlane, target)) {
+      return target.distanceTo(v.camera.position);
+    }
+    return store.focusDepth;
   }
 
   function dispose(): void {
+    stopPoseSync();
     fps?.dispose();
     fps = null;
     viewer.value?.dispose?.();
     viewer.value = null;
     isLoaded.value = false;
+  }
+
+  // ── Internal: sync Three.js camera pose → store ───────────────────────────
+
+  function startPoseSync() {
+    const tick = () => {
+      const cam = viewer.value?.camera;
+      if (cam) {
+        store.setVirtualCameraPose(
+          [cam.position.x, cam.position.y, cam.position.z],
+          [cam.quaternion.x, cam.quaternion.y, cam.quaternion.z, cam.quaternion.w],
+        );
+      }
+      poseRafId = requestAnimationFrame(tick);
+    };
+    poseRafId = requestAnimationFrame(tick);
+  }
+
+  function stopPoseSync() {
+    if (poseRafId) cancelAnimationFrame(poseRafId);
+    poseRafId = 0;
   }
 
   return {
@@ -102,7 +179,8 @@ export function useScene() {
     isFpsLocked,
     init,
     setControlMode,
-    sampleDepth,
+    getRenderCanvas,
+    sampleDepthAtScreen,
     dispose,
   };
 }
@@ -132,7 +210,6 @@ class FpsController {
     this.camera = camera;
     this.dom = dom;
     this.isLockedRef = isLockedRef;
-    // Sync initial euler from current camera rotation
     this.yaw = camera.rotation.y;
     this.pitch = camera.rotation.x;
   }
@@ -163,8 +240,6 @@ class FpsController {
   dispose(): void {
     this.disable();
   }
-
-  // ── Private handlers ───────────────────────────────────────────────────────
 
   private requestLock = (): void => {
     this.dom.requestPointerLock();
@@ -215,7 +290,6 @@ class FpsController {
     if (this.keys.has("ShiftLeft") || this.keys.has("ControlLeft")) dy -= 1;
 
     if (dx !== 0 || dy !== 0 || dz !== 0) {
-      // Move in camera-local space (horizontal plane + vertical)
       const { sin, cos } = Math;
       const forward = { x: sin(this.yaw), z: cos(this.yaw) };
       const right = { x: cos(this.yaw), z: -sin(this.yaw) };
@@ -226,17 +300,6 @@ class FpsController {
       this.camera.position.y += dy * speed;
     }
   };
-}
-
-// ── Type stubs for GaussianSplats3D ──────────────────────────────────────────
-
-interface GS3DViewer {
-  camera: unknown; // THREE.PerspectiveCamera
-  controls: { enabled: boolean } | null;
-  addSplatScene(url: string, opts?: object): Promise<void>;
-  start(): void;
-  stop(): void;
-  dispose(): void;
 }
 
 function clamp(v: number, min: number, max: number): number {

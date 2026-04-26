@@ -182,12 +182,7 @@ export class CamSimPipeline {
 
   async loadImage(file: File): Promise<void> {
     const bitmap = await createImageBitmap(file);
-    this.width = bitmap.width;
-    this.height = bitmap.height;
-
-    const canvas = this.context.canvas as HTMLCanvasElement;
-    canvas.width = this.width;
-    canvas.height = this.height;
+    this.resize(bitmap.width, bitmap.height);
 
     this.imageTexture?.destroy();
     this.imageTexture = uploadImageBitmap(this.device, bitmap);
@@ -200,6 +195,69 @@ export class CamSimPipeline {
     const result = await uploadDepthMapB64(this.device, b64, this.width, this.height);
     this.depthTexture = result.texture;
     this.depthData = result.floats;
+  }
+
+  /**
+   * Upload a per-frame source (e.g. Three.js / 3DGS WebGL canvas) into the
+   * pipeline's color texture. Resizes work textures + canvas if dimensions
+   * differ. Cheap path for the 3DGS effects overlay.
+   */
+  uploadFrame(source: HTMLCanvasElement | ImageBitmap, width: number, height: number): void {
+    if (width !== this.width || height !== this.height || !this.imageTexture) {
+      this.resize(width, height);
+      this.imageTexture?.destroy();
+      this.imageTexture = this.device.createTexture({
+        size: [width, height],
+        format: "rgba8unorm",
+        usage:
+          GPUTextureUsage.TEXTURE_BINDING |
+          GPUTextureUsage.COPY_DST |
+          GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+      this.recreateWorkTextures();
+    }
+    this.device.queue.copyExternalImageToTexture(
+      { source, flipY: true }, // WebGL canvas is bottom-up
+      { texture: this.imageTexture },
+      [width, height],
+    );
+  }
+
+  /**
+   * Fill the depth texture with a single uniform value (units: matches the
+   * shader's focus_depth). Used in 3DGS mode where per-pixel depth is
+   * unavailable. Allocates the depth texture lazily on first call.
+   */
+  setUniformDepth(value: number): void {
+    if (this.width === 0 || this.height === 0) return;
+    const needsRealloc =
+      !this.depthTexture || !this.depthData || this.depthData.length !== this.width * this.height;
+
+    if (needsRealloc) {
+      this.depthTexture?.destroy();
+      this.depthTexture = this.device.createTexture({
+        size: [this.width, this.height],
+        format: "r32float",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      });
+      this.depthData = new Float32Array(this.width * this.height);
+    }
+
+    this.depthData!.fill(value);
+    this.device.queue.writeTexture(
+      { texture: this.depthTexture! },
+      this.depthData!.buffer,
+      { bytesPerRow: this.width * 4 },
+      [this.width, this.height],
+    );
+  }
+
+  private resize(width: number, height: number): void {
+    this.width = width;
+    this.height = height;
+    const canvas = this.context.canvas as HTMLCanvasElement;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
   }
 
   /** Return the depth value [0,1] at canvas coordinates (x, y). */
